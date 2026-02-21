@@ -21,14 +21,14 @@ const string RESET = "\033[0m";
 //   2  3  4  5
 //   6  7  8  9
 //   X  10 11 X
-// Total 12 positions
+// Total 12 positions (all start as type 0)
 
 struct State {
   int towers[12];
 
   State() {
     for (int i = 0; i < 12; i++)
-      towers[i] = -1; // -1 = empty
+      towers[i] = 0; // All start as type 0 (base state)
   }
 
   int &operator[](int i) { return towers[i]; }
@@ -37,8 +37,7 @@ struct State {
   int getScore() const {
     int score = 0;
     for (int i = 0; i < 12; i++) {
-      if (towers[i] >= 0)
-        score += towers[i];
+      score += towers[i];
     }
     return score;
   }
@@ -76,9 +75,7 @@ bool canPlace(const State &state, int pos, int type) {
   // Need neighbors of types 0, 1, ..., type-1
   bool hasType[5] = {false};
   for (int neighbor : NEIGHBORS[pos]) {
-    if (state[neighbor] >= 0 && state[neighbor] < 5) {
-      hasType[state[neighbor]] = true;
-    }
+    hasType[state[neighbor]] = true;
   }
 
   // Check all required types are present
@@ -94,34 +91,24 @@ bool canPlace(const State &state, int pos, int type) {
 void printState(const State &state, int score) {
   cout << "\n=== New Best Score: " << score << " ===\n";
   cout << "  X  ";
-  cout << (state[0] >= 0 ? COLORS[state[0]] + to_string(state[0]) + RESET : " ")
-       << "  ";
-  cout << (state[1] >= 0 ? COLORS[state[1]] + to_string(state[1]) + RESET : " ")
-       << "  X\n";
+  cout << COLORS[state[0]] << state[0] << RESET << "  ";
+  cout << COLORS[state[1]] << state[1] << RESET << "  X\n";
 
   cout << "  ";
   for (int i = 2; i <= 5; i++) {
-    cout << (state[i] >= 0 ? COLORS[state[i]] + to_string(state[i]) + RESET
-                           : " ")
-         << "  ";
+    cout << COLORS[state[i]] << state[i] << RESET << "  ";
   }
   cout << "\n";
 
   cout << "  ";
   for (int i = 6; i <= 9; i++) {
-    cout << (state[i] >= 0 ? COLORS[state[i]] + to_string(state[i]) + RESET
-                           : " ")
-         << "  ";
+    cout << COLORS[state[i]] << state[i] << RESET << "  ";
   }
   cout << "\n";
 
   cout << "  X  ";
-  cout << (state[10] >= 0 ? COLORS[state[10]] + to_string(state[10]) + RESET
-                          : " ")
-       << "  ";
-  cout << (state[11] >= 0 ? COLORS[state[11]] + to_string(state[11]) + RESET
-                          : " ")
-       << "  X\n";
+  cout << COLORS[state[10]] << state[10] << RESET << "  ";
+  cout << COLORS[state[11]] << state[11] << RESET << "  X\n";
   cout << "=============================\n";
 }
 
@@ -129,7 +116,7 @@ void printState(const State &state, int score) {
 int bestScore = -1;
 State bestState;
 long long statesExplored = 0;
-const int MAX_DEPTH = 100; // Depth limit instead of visited set
+const int MAX_DEPTH = 10; // Depth limit instead of visited set
 
 // Simple DFS exploration with depth limit
 void dfs(State &current, int depth) {
@@ -153,41 +140,16 @@ void dfs(State &current, int depth) {
   if (depth >= MAX_DEPTH)
     return;
 
-  // Try all possible actions
-
-  // 1. Try placing towers
+  // Try upgrading or downgrading each position
   for (int pos = 0; pos < 12; pos++) {
-    if (current[pos] == -1) { // Empty position
-      for (int type = 0; type <= 4; type++) {
-        if (canPlace(current, pos, type)) {
-          current[pos] = type;
-          dfs(current, depth + 1);
-          current[pos] = -1; // Backtrack
-        }
-      }
-    }
-  }
+    int currentType = current[pos];
 
-  // 2. Try removing towers
-  for (int pos = 0; pos < 12; pos++) {
-    if (current[pos] >= 0) { // Has a tower
-      int savedType = current[pos];
-      current[pos] = -1;
-      dfs(current, depth + 1);
-      current[pos] = savedType; // Backtrack
-    }
-  }
-
-  // 3. Try replacing towers (upgrade/downgrade)
-  for (int pos = 0; pos < 12; pos++) {
-    if (current[pos] >= 0) { // Has a tower
-      int savedType = current[pos];
-      for (int type = 0; type <= 4; type++) {
-        if (type != savedType && canPlace(current, pos, type)) {
-          current[pos] = type;
-          dfs(current, depth + 1);
-          current[pos] = savedType; // Backtrack
-        }
+    // Try all different types (0-4)
+    for (int newType = 0; newType <= 4; newType++) {
+      if (newType != currentType && canPlace(current, pos, newType)) {
+        current[pos] = newType;
+        dfs(current, depth + 1);
+        current[pos] = currentType; // Backtrack
       }
     }
   }
@@ -197,7 +159,8 @@ int main() {
   cout << "Tower Blox Deluxe Solver - Simple DFS\n";
   cout << "======================================\n";
   cout << "Tower Types:\n";
-  cout << "  " << COLORS[0] << "0" << RESET << " (Blue)   - No requirements\n";
+  cout << "  " << COLORS[0] << "0" << RESET
+       << " (Blue)   - Base state (no requirements)\n";
   cout << "  " << COLORS[1] << "1" << RESET << " (Red)    - Needs 0 neighbor\n";
   cout << "  " << COLORS[2] << "2" << RESET
        << " (Green)  - Needs 0 and 1 neighbors\n";
@@ -205,7 +168,9 @@ int main() {
        << " (Yellow) - Needs 0, 1, and 2 neighbors\n";
   cout << "  " << COLORS[4] << "4" << RESET
        << " (White)  - Needs 0, 1, 2, and 3 neighbors\n";
-  cout << "\nStarting DFS exploration from empty grid...\n\n";
+  cout << "\nNote: All positions start at type 0 (base state).\n";
+  cout << "Algorithm tries upgrading/downgrading each position.\n";
+  cout << "\nStarting DFS exploration from all type 0 (base state)...\n\n";
 
   State start;
   dfs(start, 0);
