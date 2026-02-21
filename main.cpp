@@ -1,7 +1,7 @@
 #include <algorithm>
-#include <iomanip>
 #include <iostream>
 #include <set>
+#include <string>
 #include <vector>
 
 using namespace std;
@@ -17,17 +17,19 @@ const string COLORS[] = {
 const string RESET = "\033[0m";
 
 // Grid is 4x4 without corners
-// Layout:
-//   X 0 1 X
-//   2 3 4 5
-//   6 7 8 9
-//   X A B X
+//   X  0  1  X
+//   2  3  4  5
+//   6  7  8  9
+//   X  10 11 X
 // Total 12 positions
 
-struct Grid {
+struct State {
   int towers[12];
 
-  Grid() { fill(towers, towers + 12, 0); }
+  State() {
+    for (int i = 0; i < 12; i++)
+      towers[i] = -1; // -1 = empty
+  }
 
   int &operator[](int i) { return towers[i]; }
   const int &operator[](int i) const { return towers[i]; }
@@ -35,173 +37,165 @@ struct Grid {
   int getScore() const {
     int score = 0;
     for (int i = 0; i < 12; i++) {
-      score += towers[i];
+      if (towers[i] >= 0)
+        score += towers[i];
     }
     return score;
   }
+
+  bool operator<(const State &other) const {
+    for (int i = 0; i < 12; i++) {
+      if (towers[i] != other[i])
+        return towers[i] < other[i];
+    }
+    return false;
+  }
 };
 
-// Get neighbors for each position
-vector<int> getNeighbors(int pos) {
-  // Position mapping:
-  //   X  0  1  X
-  //   2  3  4  5
-  //   6  7  8  9
-  //   X  10 11 X
+// Neighbor lookup
+const vector<int> NEIGHBORS[12] = {
+    {1, 2, 3},            // 0
+    {0, 3, 4, 5},         // 1
+    {0, 3, 6},            // 2
+    {0, 1, 2, 4, 6, 7},   // 3
+    {1, 3, 5, 7, 8},      // 4
+    {1, 4, 8, 9},         // 5
+    {2, 3, 7, 10},        // 6
+    {3, 4, 6, 8, 10, 11}, // 7
+    {4, 5, 7, 9, 11},     // 8
+    {5, 8, 11},           // 9
+    {6, 7, 11},           // 10
+    {7, 8, 9, 10}         // 11
+};
 
-  vector<int> neighbors;
-
-  switch (pos) {
-  case 0:
-    neighbors = {1, 2, 3};
-    break;
-  case 1:
-    neighbors = {0, 3, 4, 5};
-    break;
-  case 2:
-    neighbors = {0, 3, 6};
-    break;
-  case 3:
-    neighbors = {0, 1, 2, 4, 6, 7};
-    break;
-  case 4:
-    neighbors = {1, 3, 5, 7, 8};
-    break;
-  case 5:
-    neighbors = {1, 4, 8, 9};
-    break;
-  case 6:
-    neighbors = {2, 3, 7, 10};
-    break;
-  case 7:
-    neighbors = {3, 4, 6, 8, 10, 11};
-    break;
-  case 8:
-    neighbors = {4, 5, 7, 9, 11};
-    break;
-  case 9:
-    neighbors = {5, 8, 11};
-    break;
-  case 10:
-    neighbors = {6, 7, 11};
-    break;
-  case 11:
-    neighbors = {7, 8, 9, 10};
-    break;
-  }
-
-  return neighbors;
-}
-
-// Check if a tower placement is valid
-bool isValid(const Grid &grid, int pos) {
-  int towerType = grid[pos];
-
-  // Type 0 has no requirements
-  if (towerType == 0)
+// Check if we can place a tower at position
+bool canPlace(const State &state, int pos, int type) {
+  if (type == 0)
     return true;
 
-  vector<int> neighbors = getNeighbors(pos);
-  set<int> requiredTypes;
-
-  // Build set of required neighboring tower types
-  for (int i = 0; i < towerType; i++) {
-    requiredTypes.insert(i);
-  }
-
-  // Check if all required types are present in neighbors
-  set<int> foundTypes;
-  for (int n : neighbors) {
-    foundTypes.insert(grid[n]);
-  }
-
-  for (int req : requiredTypes) {
-    if (foundTypes.find(req) == foundTypes.end()) {
-      return false;
+  // Need neighbors of types 0, 1, ..., type-1
+  bool hasType[5] = {false};
+  for (int neighbor : NEIGHBORS[pos]) {
+    if (state[neighbor] >= 0 && state[neighbor] < 5) {
+      hasType[state[neighbor]] = true;
     }
+  }
+
+  // Check all required types are present
+  for (int i = 0; i < type; i++) {
+    if (!hasType[i])
+      return false;
   }
 
   return true;
 }
 
-// Check if entire grid is valid
-bool isValidGrid(const Grid &grid) {
-  for (int i = 0; i < 12; i++) {
-    if (!isValid(grid, i)) {
-      return false;
-    }
+// Print state
+void printState(const State &state, int score) {
+  cout << "\n=== New Best Score: " << score << " ===\n";
+  cout << "  X  ";
+  cout << (state[0] >= 0 ? COLORS[state[0]] + to_string(state[0]) + RESET : " ")
+       << "  ";
+  cout << (state[1] >= 0 ? COLORS[state[1]] + to_string(state[1]) + RESET : " ")
+       << "  X\n";
+
+  cout << "  ";
+  for (int i = 2; i <= 5; i++) {
+    cout << (state[i] >= 0 ? COLORS[state[i]] + to_string(state[i]) + RESET
+                           : " ")
+         << "  ";
   }
-  return true;
+  cout << "\n";
+
+  cout << "  ";
+  for (int i = 6; i <= 9; i++) {
+    cout << (state[i] >= 0 ? COLORS[state[i]] + to_string(state[i]) + RESET
+                           : " ")
+         << "  ";
+  }
+  cout << "\n";
+
+  cout << "  X  ";
+  cout << (state[10] >= 0 ? COLORS[state[10]] + to_string(state[10]) + RESET
+                          : " ")
+       << "  ";
+  cout << (state[11] >= 0 ? COLORS[state[11]] + to_string(state[11]) + RESET
+                          : " ")
+       << "  X\n";
+  cout << "=============================\n";
 }
 
-// Print the grid
-void printGrid(const Grid &grid, int score) {
-  cout << "\n=== Layout Found! Score: " << score << " ===\n";
-  cout << "  X  " << COLORS[grid[0]] << grid[0] << RESET << "  "
-       << COLORS[grid[1]] << grid[1] << RESET << "  X\n";
-  cout << "  " << COLORS[grid[2]] << grid[2] << RESET << "  " << COLORS[grid[3]]
-       << grid[3] << RESET << "  " << COLORS[grid[4]] << grid[4] << RESET
-       << "  " << COLORS[grid[5]] << grid[5] << RESET << "\n";
-  cout << "  " << COLORS[grid[6]] << grid[6] << RESET << "  " << COLORS[grid[7]]
-       << grid[7] << RESET << "  " << COLORS[grid[8]] << grid[8] << RESET
-       << "  " << COLORS[grid[9]] << grid[9] << RESET << "\n";
-  cout << "  X  " << COLORS[grid[10]] << grid[10] << RESET << "  "
-       << COLORS[grid[11]] << grid[11] << RESET << "  X\n";
-  cout << "================================\n";
-}
+// Global tracking
+int bestScore = -1;
+State bestState;
+long long statesExplored = 0;
+const int MAX_DEPTH = 100; // Depth limit instead of visited set
 
-// Brute force all possibilities
-void bruteForce() {
-  Grid grid;
-  int maxScore = -1;
-  long long totalConfigs = 0;
-  long long validConfigs = 0;
+// Simple DFS exploration with depth limit
+void dfs(State &current, int depth) {
+  statesExplored++;
 
-  // Try all combinations: 5^12 possibilities
-  long long maxCombinations = 1;
-  for (int i = 0; i < 12; i++)
-    maxCombinations *= 5;
+  // Check if this is a new best
+  int score = current.getScore();
+  if (score > bestScore) {
+    bestScore = score;
+    bestState = current;
+    printState(current, score);
+  }
 
-  cout << "Starting brute force search...\n";
-  cout << "Total combinations to check: " << maxCombinations << "\n\n";
+  // Progress indicator
+  if (statesExplored % 100000 == 0) {
+    cout << "Explored: " << statesExplored << " states | Best: " << bestScore
+         << " | Depth: " << depth << "\r" << flush;
+  }
 
-  for (long long combo = 0; combo < maxCombinations; combo++) {
-    totalConfigs++;
+  // Stop if depth limit reached
+  if (depth >= MAX_DEPTH)
+    return;
 
-    // Convert combo number to grid configuration
-    long long temp = combo;
-    for (int i = 0; i < 12; i++) {
-      grid[i] = temp % 5;
-      temp /= 5;
-    }
+  // Try all possible actions
 
-    // Check if valid
-    if (isValidGrid(grid)) {
-      validConfigs++;
-      int score = grid.getScore();
-
-      // Print if better score found
-      if (score > maxScore) {
-        maxScore = score;
-        printGrid(grid, score);
+  // 1. Try placing towers
+  for (int pos = 0; pos < 12; pos++) {
+    if (current[pos] == -1) { // Empty position
+      for (int type = 0; type <= 4; type++) {
+        if (canPlace(current, pos, type)) {
+          current[pos] = type;
+          dfs(current, depth + 1);
+          current[pos] = -1; // Backtrack
+        }
       }
     }
+  }
 
-    // Progress indicator
-    if (combo % 1000000 == 0) {
-      cout << "Progress: " << (combo * 100 / maxCombinations) << "%\r" << flush;
+  // 2. Try removing towers
+  for (int pos = 0; pos < 12; pos++) {
+    if (current[pos] >= 0) { // Has a tower
+      int savedType = current[pos];
+      current[pos] = -1;
+      dfs(current, depth + 1);
+      current[pos] = savedType; // Backtrack
     }
   }
 
-  cout << "\n\nSearch complete!\n";
-  cout << "Total configurations checked: " << totalConfigs << "\n";
-  cout << "Valid configurations found: " << validConfigs << "\n";
-  cout << "Best score: " << maxScore << "\n";
+  // 3. Try replacing towers (upgrade/downgrade)
+  for (int pos = 0; pos < 12; pos++) {
+    if (current[pos] >= 0) { // Has a tower
+      int savedType = current[pos];
+      for (int type = 0; type <= 4; type++) {
+        if (type != savedType && canPlace(current, pos, type)) {
+          current[pos] = type;
+          dfs(current, depth + 1);
+          current[pos] = savedType; // Backtrack
+        }
+      }
+    }
+  }
 }
 
 int main() {
-  cout << "Tower Blox Deluxe City Layout Solver\n";
-  cout << "=====================================\n";
+  cout << "Tower Blox Deluxe Solver - Simple DFS\n";
+  cout << "======================================\n";
   cout << "Tower Types:\n";
   cout << "  " << COLORS[0] << "0" << RESET << " (Blue)   - No requirements\n";
   cout << "  " << COLORS[1] << "1" << RESET << " (Red)    - Needs 0 neighbor\n";
@@ -211,9 +205,17 @@ int main() {
        << " (Yellow) - Needs 0, 1, and 2 neighbors\n";
   cout << "  " << COLORS[4] << "4" << RESET
        << " (White)  - Needs 0, 1, 2, and 3 neighbors\n";
-  cout << "\n";
+  cout << "\nStarting DFS exploration from empty grid...\n\n";
 
-  bruteForce();
+  State start;
+  dfs(start, 0);
+
+  cout << "\n\nExploration Complete!\n";
+  cout << "States explored: " << statesExplored << "\n";
+  cout << "Best score: " << bestScore << "\n\n";
+
+  cout << "Final best layout:\n";
+  printState(bestState, bestScore);
 
   return 0;
 }
