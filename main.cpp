@@ -7,6 +7,17 @@
 
 using namespace std;
 
+// Hash specialization for uint128_simd (must be after including grid.h)
+namespace robin_hood {
+template <> struct hash<uint128_simd> {
+  size_t operator()(const uint128_simd &x) const noexcept {
+    uint64_t lo = _mm_cvtsi128_si64(x.value);
+    uint64_t hi = _mm_cvtsi128_si64(_mm_unpackhi_epi64(x.value, x.value));
+    return size_t(lo ^ hi);
+  }
+};
+} // namespace robin_hood
+
 // ── Hot-path lookup tables ─────────────────────────────────────────────────
 // Flat fixed-size arrays eliminate vector pointer indirection in the inner
 // loop. Max grid 7×7 = 49 positions, max 4 orthogonal neighbors each. Neighbor
@@ -30,21 +41,26 @@ static int g_numSymm;
 static int g_symmPerm[8][49]; // g_symmPerm[s][i] = image of position i under
                               // symmetry s
 
-inline uint64_t applyPerm(uint64_t s, const int *perm) {
-  uint64_t result = 0;
+inline StateType applyPerm(StateType s, const int *perm) {
+  StateType result = 0;
   for (int i = 0; i < g_numPos; i++)
-    result |= uint64_t((s >> (i * 3)) & 7) << (perm[i] * 3);
+    result |= StateType((s >> (i * 3)) & 7) << (perm[i] * 3);
   return result;
 }
 
-// Canonical form = minimum uint64_t value over all symmetry images.
+// Canonical form = minimum StateType value over all symmetry images.
 // The minimum is a unique representative of the equivalence class.
-inline uint64_t canonical(uint64_t s) {
-  uint64_t best = s;
+inline StateType canonical(StateType s) {
+  if (g_numSymm == 1)
+    return s; // No symmetries, skip computation
+  StateType best = s;
   for (int k = 1; k < g_numSymm; k++) {
-    uint64_t t = applyPerm(s, g_symmPerm[k]);
-    if (t < best)
+    StateType t = applyPerm(s, g_symmPerm[k]);
+    if (t < best) {
       best = t;
+      if (best == StateType(0))
+        return StateType(0); // Early exit: can't get smaller than 0
+    }
   }
   return best;
 }
@@ -107,19 +123,19 @@ static void buildLookupTables() {
 // Each position stores a value 0-4 (fits in 3 bits).
 // Up to 21 positions × 3 bits = 63 bits → fits in uint64_t.
 
-inline uint64_t stateSet(uint64_t s, int pos, int val) {
-  s &= ~(uint64_t(7) << (pos * 3));
-  s |= uint64_t(val) << (pos * 3);
+inline StateType stateSet(StateType s, int pos, int val) {
+  s &= ~(StateType(7) << (pos * 3));
+  s |= StateType(val) << (pos * 3);
   return s;
 }
-inline int stateGet(uint64_t s, int pos) { return (s >> (pos * 3)) & 7; }
+inline int stateGet(StateType s, int pos) { return (s >> (pos * 3)) & 7; }
 
 // ── Placement rule ─────────────────────────────────────────────────────────
 // Tower of type T at pos requires one neighbor of each type 0..T-1.
 // neighborPresent() computes the bitmask once per (state, pos); canPlace()
 // then checks it cheaply for each candidate type.
 
-inline uint32_t neighborPresent(uint64_t state, int pos) {
+inline uint32_t neighborPresent(StateType state, int pos) {
   uint32_t present = 0;
   const int *shifts = g_neighborShifts[pos];
   int count = g_neighborCount[pos];
@@ -139,19 +155,19 @@ inline bool canPlace(uint32_t present, int type) {
 // the transitions stored in the visited map (which live in canonical space).
 
 template <typename MapType>
-inline void printBuildPath(uint64_t bestState, const MapType &visited) {
+inline void printBuildPath(StateType bestState, const MapType &visited) {
   vector<pair<int, int>> steps; // (pos, newType)
-  uint64_t cur = bestState;
-  while (visited.at(cur).pos != -1) {
+  StateType cur = bestState;
+  while (visited.at(cur).getPos() != -1) {
     const auto &tr = visited.at(cur);
-    steps.push_back({tr.pos, tr.type});
+    steps.push_back({tr.getPos(), tr.getType()});
     cur = tr.parent;
   }
   reverse(steps.begin(), steps.end());
 
   cout << "\n--- Build path (" << steps.size() << " steps) ---\n\n";
 
-  uint64_t state = 0;
+  StateType state = 0;
   cout << "Start:\n";
   printGrid(state);
 
@@ -171,7 +187,7 @@ inline void printBuildPath(uint64_t bestState, const MapType &visited) {
 }
 
 struct SearchResult {
-  uint64_t bestState;
+  StateType bestState;
   int bestScore;
   long long explored;
   size_t uniqueStates;
@@ -179,11 +195,11 @@ struct SearchResult {
 
 // BFS from state 0 stopping as soon as target is reached.
 // Returns a parent-pointer map containing the shortest path to target.
-inline robin_hood::unordered_map<uint64_t, Transition>
-bfsShortestPath(uint64_t target) {
-  robin_hood::unordered_map<uint64_t, Transition> path;
+inline robin_hood::unordered_map<StateType, Transition>
+bfsShortestPath(StateType target) {
+  robin_hood::unordered_map<StateType, Transition> path;
   struct Entry {
-    uint64_t state;
+    StateType state;
     int score;
   };
   vector<Entry> q;
@@ -206,7 +222,7 @@ bfsShortestPath(uint64_t target) {
           continue;
         if (!canPlace(present, newType))
           continue;
-        uint64_t next = canonical(stateSet(cur, pos, newType));
+        StateType next = canonical(stateSet(cur, pos, newType));
         auto [it, inserted] = path.try_emplace(
             next, Transition{cur, (int8_t)pos, (int8_t)newType});
         if (inserted)
@@ -219,13 +235,13 @@ bfsShortestPath(uint64_t target) {
 
 static SearchResult runIDDFS() {
   SearchResult result{0, 0, 0, 1};
-  robin_hood::unordered_set<uint64_t> globalSeen;
+  robin_hood::unordered_set<StateType> globalSeen;
   globalSeen.insert(0);
 
   for (int depthLimit = 1;; depthLimit++) {
-    robin_hood::unordered_set<uint64_t> seen;
+    robin_hood::unordered_set<StateType> seen;
     struct Entry {
-      uint64_t state;
+      StateType state;
       int score;
       int depth;
     };
@@ -261,7 +277,7 @@ static SearchResult runIDDFS() {
           if (!canPlace(present, newType))
             continue;
 
-          uint64_t next = canonical(stateSet(cur.state, pos, newType));
+          StateType next = canonical(stateSet(cur.state, pos, newType));
           int nextScore = cur.score + (newType - curType);
           if (seen.insert(next).second) {
             if (globalSeen.insert(next).second)
@@ -302,7 +318,7 @@ int main() {
   buildSymmetries();
 
   SearchResult result{0, 0, 0, 0};
-  robin_hood::unordered_map<uint64_t, Transition> visited;
+  robin_hood::unordered_map<StateType, Transition> visited;
 
   if (SEARCH_MODE == 2) {
     result = runIDDFS();
@@ -311,13 +327,13 @@ int main() {
     // For BFS, the vector is used as a queue with a head index.
     // For DFS, the vector is used as a stack via push_back/pop_back.
     struct Entry {
-      uint64_t state;
+      StateType state;
       int score;
     };
     vector<Entry> q;
     size_t head = 0;
 
-    uint64_t startState = 0;
+    StateType startState = 0;
     visited[startState] = {0, -1, -1};
     q.push_back({startState, 0});
 
@@ -355,7 +371,7 @@ int main() {
           if (!canPlace(present, newType))
             continue;
 
-          uint64_t next = canonical(stateSet(cur, pos, newType));
+          StateType next = canonical(stateSet(cur, pos, newType));
           int nextScore = curScore + (newType - curType);
           auto [it, inserted] = visited.try_emplace(
               next, Transition{cur, (int8_t)pos, (int8_t)newType});

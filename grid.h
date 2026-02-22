@@ -1,12 +1,105 @@
 #pragma once
 
 #include <algorithm>
+#include <emmintrin.h> // SSE2 intrinsics for __m128i
 #include <iostream>
 #include <map>
 #include <string>
 #include <vector>
 
 using namespace std;
+
+// ══════════════════════════════════════════════════════════════════════════
+// State Type Selection (based on grid size)
+// ══════════════════════════════════════════════════════════════════════════
+// Each position needs 3 bits (types 0-4)
+// uint64_t: 64 bits / 3 = 21 positions max
+// Custom 128-bit using SIMD: 128 bits / 3 = 42 positions max
+
+// Custom 128-bit integer using SIMD intrinsics (works on MSVC)
+struct uint128_simd {
+  __m128i value;
+
+  uint128_simd() : value(_mm_setzero_si128()) {}
+  uint128_simd(__m128i v) : value(v) {}
+  uint128_simd(uint64_t v) : value(_mm_set_epi64x(0, v)) {}
+
+  operator __m128i() const { return value; }
+
+  uint128_simd operator|(const uint128_simd &other) const {
+    return _mm_or_si128(value, other.value);
+  }
+
+  uint128_simd operator&(const uint128_simd &other) const {
+    return _mm_and_si128(value, other.value);
+  }
+
+  uint128_simd operator~() const {
+    return _mm_xor_si128(value, _mm_set1_epi32(-1));
+  }
+
+  uint128_simd &operator|=(const uint128_simd &other) {
+    value = _mm_or_si128(value, other.value);
+    return *this;
+  }
+
+  uint128_simd &operator&=(const uint128_simd &other) {
+    value = _mm_and_si128(value, other.value);
+    return *this;
+  }
+
+  uint128_simd operator>>(int shift) const {
+    if (shift == 0)
+      return *this;
+    if (shift >= 128)
+      return uint128_simd(0);
+    if (shift >= 64) {
+      uint64_t hi = _mm_cvtsi128_si64(_mm_unpackhi_epi64(value, value));
+      return uint128_simd(hi >> (shift - 64));
+    }
+    // Shift within 128 bits
+    __m128i shifted = _mm_srli_epi64(value, shift);
+    // Handle carry from high to low
+    __m128i carry =
+        _mm_slli_epi64(_mm_unpackhi_epi64(value, value), 64 - shift);
+    return _mm_or_si128(shifted,
+                        _mm_unpacklo_epi64(carry, _mm_setzero_si128()));
+  }
+
+  uint128_simd operator<<(int shift) const {
+    if (shift == 0)
+      return *this;
+    if (shift >= 128)
+      return uint128_simd(0);
+    if (shift >= 64) {
+      uint64_t lo = _mm_cvtsi128_si64(value);
+      return _mm_set_epi64x(lo << (shift - 64), 0);
+    }
+    // Shift within 128 bits
+    __m128i shifted = _mm_slli_epi64(value, shift);
+    // Handle carry from low to high
+    uint64_t lo = _mm_cvtsi128_si64(value);
+    __m128i carry = _mm_set_epi64x(lo >> (64 - shift), 0);
+    return _mm_or_si128(shifted, carry);
+  }
+
+  bool operator<(const uint128_simd &other) const {
+    uint64_t this_hi = _mm_cvtsi128_si64(_mm_unpackhi_epi64(value, value));
+    uint64_t this_lo = _mm_cvtsi128_si64(value);
+    uint64_t other_hi =
+        _mm_cvtsi128_si64(_mm_unpackhi_epi64(other.value, other.value));
+    uint64_t other_lo = _mm_cvtsi128_si64(other.value);
+    return (this_hi < other_hi) || (this_hi == other_hi && this_lo < other_lo);
+  }
+
+  bool operator==(const uint128_simd &other) const {
+    __m128i cmp = _mm_cmpeq_epi32(value, other.value);
+    return _mm_movemask_epi8(cmp) == 0xFFFF;
+  }
+};
+
+using StateType64 = uint64_t;
+using StateType128 = uint128_simd;
 
 // ANSI color codes
 const string COLORS[] = {
@@ -77,12 +170,20 @@ struct GridConfig {
 // Configuration Constants
 // ══════════════════════════════════════════════════════════════════════════
 
-const int LEVEL = 2;
+const int LEVEL = 1;
 // 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS)
-const int SEARCH_MODE = 1;
+[[maybe_unused]] const int SEARCH_MODE = 0;
 // Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
 // Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
 const int MAX_UNLOCKED_TYPE = 4;
+
+// Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
+// 128-bit
+#if LEVEL <= 3
+using StateType = StateType64;
+#else
+using StateType = StateType128;
+#endif
 
 // ══════════════════════════════════════════════════════════════════════════
 // Grid Creation
@@ -158,10 +259,10 @@ inline GridConfig &getGrid() {
 // ── Grid display ───────────────────────────────────────────────────────────
 
 // Forward declarations for state functions (defined in main.cpp)
-extern int stateGet(uint64_t s, int pos);
-extern uint64_t stateSet(uint64_t s, int pos, int val);
+extern int stateGet(StateType s, int pos);
+extern StateType stateSet(StateType s, int pos, int val);
 
-inline void printGrid(uint64_t s) {
+inline void printGrid(StateType s) {
   auto cell = [&](int r, int c) -> string {
     pair<int, int> coord = {r, c};
     if (!GRID.coordToIdx.count(coord))
@@ -184,9 +285,18 @@ inline void printGrid(uint64_t s) {
 
 // ── Path reconstruction ────────────────────────────────────────────────────
 
+// Transition struct optimized for board size
+// For grids ≤52 positions: pack pos (6 bits) + type (3 bits) + sentinel into
+// uint16_t This reduces Transition size and improves cache utilization
 struct Transition {
-  uint64_t parent;
-  int8_t pos;  // position changed (-1 = start sentinel)
-  int8_t type; // new type applied
+  StateType parent;
+  uint16_t packed; // bits 0-5: pos (0-63, 63=sentinel), bits 6-8: type (0-4)
+
+  Transition(StateType p = 0, int8_t pos = -1, int8_t type = 0)
+      : parent(p), packed((pos == -1 ? 63 : pos) | (type << 6)) {}
+
+  int8_t getPos() const { return (packed & 0x3F) == 63 ? -1 : (packed & 0x3F); }
+  int8_t getType() const { return (packed >> 6) & 0x7; }
 };
+
 // printBuildPath is defined in main.cpp (needs canonical(), which lives there)
