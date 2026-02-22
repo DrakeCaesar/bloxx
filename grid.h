@@ -117,7 +117,9 @@ inline GridConfig createLevel5Grid() {
                                 "...... ", "...... ", "...    "});
 };
 
-const int LEVEL = 2;
+const int LEVEL = 1;
+// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS)
+const int SEARCH_MODE = 2;
 
 inline GridConfig createGrid() {
   switch (LEVEL) {
