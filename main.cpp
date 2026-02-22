@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <iostream>
+#include <map>
 #include <queue>
 #include <string>
 #include <unordered_map>
@@ -19,46 +20,115 @@ const string COLOR_NAMES[] = {"Blue", "Red", "Green", "Yellow", "White"};
 const string RESET = "\033[0m";
 const string BLACK_TEXT = "\033[30m"; // Black text for number
 
-// Grid layout (orthogonal adjacency only):
-//   X  0  1  X
-//   2  3  4  5
-//   6  7  8  9
-//   X  10 11 X
+// ══════════════════════════════════════════════════════════════════════════
+// Grid Configuration
+// ══════════════════════════════════════════════════════════════════════════
 
-const vector<int> NEIGHBORS[12] = {
-    {1, 3},        // 0
-    {0, 4},        // 1
-    {3, 6},        // 2
-    {0, 2, 4, 7},  // 3
-    {1, 3, 5, 8},  // 4
-    {4, 9},        // 5
-    {2, 7},        // 6
-    {3, 6, 8, 10}, // 7
-    {4, 7, 9, 11}, // 8
-    {5, 8},        // 9
-    {7, 11},       // 10
-    {8, 10}        // 11
+struct GridConfig {
+  int rows;
+  int cols;
+  vector<pair<int, int>> positions;    // list of (row, col) coords
+  map<pair<int, int>, int> coordToIdx; // coord -> position index
+  vector<vector<int>> neighbors; // neighbors[idx] = list of neighbor indices
+  vector<int> maxType;           // maxType[idx] = max tower type achievable
+
+  int numPositions() const { return (int)positions.size(); }
+
+  void computeNeighbors() {
+    neighbors.clear();
+    neighbors.resize(numPositions());
+
+    for (int i = 0; i < numPositions(); i++) {
+      int r = positions[i].first;
+      int c = positions[i].second;
+      // Check 4 orthogonal directions
+      vector<pair<int, int>> dirs = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+      for (int d = 0; d < 4; d++) {
+        int dr = dirs[d].first;
+        int dc = dirs[d].second;
+        pair<int, int> neighbor = {r + dr, c + dc};
+        if (coordToIdx.count(neighbor)) {
+          neighbors[i].push_back(coordToIdx[neighbor]);
+        }
+      }
+    }
+  }
+
+  void computeMaxTypes() {
+    maxType.clear();
+    maxType.resize(numPositions());
+    for (int i = 0; i < numPositions(); i++) {
+      maxType[i] = min(4, (int)neighbors[i].size());
+    }
+  }
+
+  void build() {
+    coordToIdx.clear();
+    for (int i = 0; i < numPositions(); i++) {
+      coordToIdx[positions[i]] = i;
+    }
+    computeNeighbors();
+    computeMaxTypes();
+  }
 };
 
-// Max achievable type = min(neighbor count, 4)
-const int MAX_TYPE[12] = {
-    2, // 0:  2 neighbors
-    2, // 1:  2 neighbors
-    2, // 2:  2 neighbors
-    4, // 3:  4 neighbors
-    4, // 4:  4 neighbors
-    2, // 5:  2 neighbors
-    2, // 6:  2 neighbors
-    4, // 7:  4 neighbors
-    4, // 8:  4 neighbors
-    2, // 9:  2 neighbors
-    2, // 10: 2 neighbors
-    2  // 11: 2 neighbors
-};
+// Default: 4x4 grid without corners (Tower Blox Deluxe first level)
+GridConfig createDefaultGrid() {
+  GridConfig g;
+  g.rows = 4;
+  g.cols = 4;
+  g.positions = {
+      {0, 1}, {0, 2},                 // row 0: positions 0, 1
+      {1, 0}, {1, 1}, {1, 2}, {1, 3}, // row 1: positions 2, 3, 4, 5
+      {2, 0}, {2, 1}, {2, 2}, {2, 3}, // row 2: positions 6, 7, 8, 9
+      {3, 1}, {3, 2}                  // row 3: positions 10, 11
+  };
+  g.build();
+  return g;
+}
+
+GridConfig GRID = createDefaultGrid();
+
+// Create grid from string pattern
+// '.' = valid position, ' ' or '#' = blank/invalid
+GridConfig createGridFromPattern(const vector<string> &pattern) {
+  GridConfig g;
+  g.rows = (int)pattern.size();
+  g.cols = 0;
+  for (const auto &row : pattern) {
+    g.cols = max(g.cols, (int)row.size());
+  }
+
+  for (int r = 0; r < g.rows; r++) {
+    for (int c = 0; c < (int)pattern[r].size(); c++) {
+      if (pattern[r][c] == '.') {
+        g.positions.push_back({r, c});
+      }
+    }
+  }
+
+  g.build();
+  return g;
+}
+
+// Example patterns
+GridConfig createSmallGrid() { return createGridFromPattern({"..", ".."}); }
+
+GridConfig createCrossGrid() {
+  return createGridFromPattern({" . ", "...", " . "});
+}
+
+GridConfig createLargeGrid() {
+  return createGridFromPattern({".....", ".....", ".....", ".....", "....."});
+}
+
+GridConfig createCustomGrid() {
+  return createGridFromPattern({" ... ", ".....", ".....", ".....", " ... "});
+}
 
 // ── State packing ──────────────────────────────────────────────────────────
 // Each position stores a value 0-4 (fits in 3 bits).
-// 12 positions × 3 bits = 36 bits → fits in uint64_t.
+// Up to 21 positions × 3 bits = 63 bits → fits in uint64_t.
 
 inline uint64_t stateSet(uint64_t s, int pos, int val) {
   s &= ~(uint64_t(7) << (pos * 3));
@@ -68,7 +138,7 @@ inline uint64_t stateSet(uint64_t s, int pos, int val) {
 inline int stateGet(uint64_t s, int pos) { return (s >> (pos * 3)) & 7; }
 inline int stateScore(uint64_t s) {
   int total = 0;
-  for (int i = 0; i < 12; i++)
+  for (int i = 0; i < GRID.numPositions(); i++)
     total += stateGet(s, i);
   return total;
 }
@@ -80,7 +150,7 @@ bool canPlace(uint64_t state, int pos, int type) {
   if (type == 0)
     return true;
   bool has[5] = {};
-  for (int n : NEIGHBORS[pos])
+  for (int n : GRID.neighbors[pos])
     has[stateGet(state, n)] = true;
   for (int i = 0; i < type; i++)
     if (!has[i])
@@ -91,16 +161,24 @@ bool canPlace(uint64_t state, int pos, int type) {
 // ── Grid display ───────────────────────────────────────────────────────────
 
 void printGrid(uint64_t s) {
-  auto cell = [&](int pos) {
-    int t = stateGet(s, pos);
+  auto cell = [&](int r, int c) -> string {
+    pair<int, int> coord = {r, c};
+    if (!GRID.coordToIdx.count(coord))
+      return " ";
+    int idx = GRID.coordToIdx[coord];
+    int t = stateGet(s, idx);
     return COLORS[t] + BLACK_TEXT + to_string(t) + RESET;
   };
-  cout << "    " << cell(0) << " " << cell(1) << "\n";
-  cout << "  " << cell(2) << " " << cell(3) << " " << cell(4) << " " << cell(5)
-       << "\n";
-  cout << "  " << cell(6) << " " << cell(7) << " " << cell(8) << " " << cell(9)
-       << "\n";
-  cout << "    " << cell(10) << " " << cell(11) << "\n";
+
+  for (int r = 0; r < GRID.rows; r++) {
+    cout << "  ";
+    for (int c = 0; c < GRID.cols; c++) {
+      cout << cell(r, c);
+      if (c < GRID.cols - 1)
+        cout << " ";
+    }
+    cout << "\n";
+  }
 }
 
 // ── Path reconstruction ────────────────────────────────────────────────────
@@ -181,9 +259,9 @@ int main() {
     }
 
     // Try every possible single-position change
-    for (int pos = 0; pos < 12; pos++) {
+    for (int pos = 0; pos < GRID.numPositions(); pos++) {
       int curType = stateGet(cur, pos);
-      for (int newType = 0; newType <= MAX_TYPE[pos]; newType++) {
+      for (int newType = 0; newType <= GRID.maxType[pos]; newType++) {
         if (newType == curType)
           continue;
         if (!canPlace(cur, pos, newType))
