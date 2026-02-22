@@ -113,26 +113,24 @@ inline uint64_t stateSet(uint64_t s, int pos, int val) {
   return s;
 }
 inline int stateGet(uint64_t s, int pos) { return (s >> (pos * 3)) & 7; }
-inline int stateScore(uint64_t s) {
-  int total = 0;
-  for (int i = 0; i < g_numPos; i++)
-    total += (s >> (i * 3)) & 7;
-  return total;
-}
 
 // ── Placement rule ─────────────────────────────────────────────────────────
 // Tower of type T at pos requires one neighbor of each type 0..T-1.
+// neighborPresent() computes the bitmask once per (state, pos); canPlace()
+// then checks it cheaply for each candidate type.
 
-inline bool canPlace(uint64_t state, int pos, int type) {
-  if (type == 0)
-    return true;
-  // Bitmask of which types are present among neighbors (bit i = type i seen)
+inline uint32_t neighborPresent(uint64_t state, int pos) {
   uint32_t present = 0;
   const int *shifts = g_neighborShifts[pos];
   int count = g_neighborCount[pos];
   for (int i = 0; i < count; i++)
     present |= 1u << ((state >> shifts[i]) & 7);
-  // Need all of types 0..type-1: use precomputed mask
+  return present;
+}
+
+inline bool canPlace(uint32_t present, int type) {
+  if (type == 0)
+    return true;
   return (present & g_requiredMask[type]) == g_requiredMask[type];
 }
 
@@ -222,10 +220,11 @@ int main() {
     // Try every possible single-position change
     for (int pos = 0; pos < g_numPos; pos++) {
       int curType = stateGet(cur, pos);
+      uint32_t present = neighborPresent(cur, pos); // computed once per pos
       for (int newType = 0; newType <= g_maxType[pos]; newType++) {
         if (newType == curType)
           continue;
-        if (!canPlace(cur, pos, newType))
+        if (!canPlace(present, newType))
           continue;
 
         uint64_t next = canonical(stateSet(cur, pos, newType));
