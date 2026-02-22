@@ -93,7 +93,7 @@ int main() {
       }
     }
 
-    if (explored % 200000 == 0)
+    if (explored % 2000000 == 0)
       cout << "Explored: " << explored << " | Visited: " << visited.size()
            << " | Best: " << bestScore << "\r" << flush;
   }
