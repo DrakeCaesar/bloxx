@@ -108,7 +108,16 @@ inline GridConfig createLevel3Grid() {
   return createGridFromPattern({".....", ".....", "  .  ", ".....", "....."});
 }
 
-// Select which level to solve (1, 2, or 3)
+inline GridConfig createLevel4Grid() {
+  return createGridFromPattern(
+      {"......", "..  ..", " .... ", " .... ", "..  ..", "......"});
+};
+
+inline GridConfig createLevel5Grid() {
+  return createGridFromPattern({"    ...", " ......", " ......", " .. .. ",
+                                "...... ", "...... ", "...    "});
+};
+
 const int LEVEL = 1;
 
 inline GridConfig createGrid() {
@@ -117,6 +126,10 @@ inline GridConfig createGrid() {
     return createLevel2Grid();
   case 3:
     return createLevel3Grid();
+  case 4:
+    return createLevel4Grid();
+  case 5:
+    return createLevel5Grid();
   default:
     return createLevel1Grid();
   }
