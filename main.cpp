@@ -1,6 +1,6 @@
 #include <iostream>
-#include <vector>
 #include <robin_hood.h>
+#include <vector>
 
 #include "grid.h"
 
@@ -125,7 +125,8 @@ int main() {
 
         uint64_t next = stateSet(cur, pos, newType);
         int nextScore = curScore + (newType - curType);
-        auto [it, inserted] = visited.try_emplace(next, Transition{cur, (int8_t)pos, (int8_t)newType});
+        auto [it, inserted] = visited.try_emplace(
+            next, Transition{cur, (int8_t)pos, (int8_t)newType});
         if (inserted) {
           q.push_back({next, nextScore});
         }

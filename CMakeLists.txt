@@ -13,7 +13,7 @@ add_compile_options(/MP)
 
 # Robin-hood hashing library
 include(FetchContent)
-FetchContent_Declare(robin_hood 
+FetchContent_Declare(robin_hood
   GIT_REPOSITORY https://github.com/martinus/robin-hood-hashing.git
   GIT_TAG 3.11.5
 )
