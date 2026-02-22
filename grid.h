@@ -4,7 +4,6 @@
 #include <iostream>
 #include <map>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 using namespace std;
@@ -118,7 +117,7 @@ inline GridConfig createLevel5Grid() {
                                 "...... ", "...... ", "...    "});
 };
 
-const int LEVEL = 1;
+const int LEVEL = 2;
 
 inline GridConfig createGrid() {
   switch (LEVEL) {
@@ -176,35 +175,4 @@ struct Transition {
   int8_t pos;  // position changed (-1 = start sentinel)
   int8_t type; // new type applied
 };
-
-template <typename MapType>
-inline void printBuildPath(uint64_t bestState, const MapType &visited) {
-  // Walk back from best state to start
-  vector<pair<int, int>> steps; // (pos, newType)
-  uint64_t cur = bestState;
-  while (visited.at(cur).pos != -1) {
-    const auto &tr = visited.at(cur);
-    steps.push_back({tr.pos, tr.type});
-    cur = tr.parent;
-  }
-  reverse(steps.begin(), steps.end());
-
-  cout << "\n--- Build path (" << steps.size() << " steps) ---\n\n";
-
-  uint64_t state = 0; // start: all type 0
-  cout << "Start:\n";
-  printGrid(state);
-
-  for (int i = 0; i < (int)steps.size(); i++) {
-    int pos = steps[i].first;
-    int newType = steps[i].second;
-    int oldType = stateGet(state, pos);
-    state = stateSet(state, pos, newType);
-
-    cout << "\nStep " << (i + 1) << ": pos " << pos << "  " << COLORS[oldType]
-         << BLACK_TEXT << COLOR_NAMES[oldType] << RESET << " (" << oldType
-         << ") -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType]
-         << RESET << " (" << newType << ")\n";
-    printGrid(state);
-  }
-}
+// printBuildPath is defined in main.cpp (needs canonical(), which lives there)

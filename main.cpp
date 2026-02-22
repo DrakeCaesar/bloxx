@@ -1,3 +1,4 @@
+#include <functional>
 #include <iostream>
 #include <robin_hood.h>
 #include <vector>
@@ -19,6 +20,74 @@ static int g_neighborShifts[49][4]; // precomputed: neighborIndex * 3
 static int g_neighborCount[49];
 static int g_maxType[49];
 static const uint32_t g_requiredMask[5] = {0, 1, 3, 7, 15}; // (1<<type)-1
+
+// ── Symmetry ───────────────────────────────────────────────────────────────
+// Auto-detects valid symmetries by trying all 8 dihedral transforms against
+// actual grid positions. Keeps only those where every position maps to another
+// valid position. Identity is always first (index 0).
+
+static int g_numSymm;
+static int g_symmPerm[8][49]; // g_symmPerm[s][i] = image of position i under
+                              // symmetry s
+
+inline uint64_t applyPerm(uint64_t s, const int *perm) {
+  uint64_t result = 0;
+  for (int i = 0; i < g_numPos; i++)
+    result |= uint64_t((s >> (i * 3)) & 7) << (perm[i] * 3);
+  return result;
+}
+
+// Canonical form = minimum uint64_t value over all symmetry images.
+// The minimum is a unique representative of the equivalence class.
+inline uint64_t canonical(uint64_t s) {
+  uint64_t best = s;
+  for (int k = 1; k < g_numSymm; k++) {
+    uint64_t t = applyPerm(s, g_symmPerm[k]);
+    if (t < best)
+      best = t;
+  }
+  return best;
+}
+
+static void buildSymmetries() {
+  int R = GRID.rows, C = GRID.cols;
+  // All 8 elements of the dihedral group D4:
+  //   identity, 180° rot, 90° CW, 90° CCW, H-flip, V-flip, diagonal,
+  //   anti-diagonal
+  using T = function<pair<int, int>(int, int)>;
+  T transforms[8] = {
+      [](int r, int c) { return make_pair(r, c); },
+      [R, C](int r, int c) { return make_pair(R - 1 - r, C - 1 - c); },
+      [R](int r, int c) { return make_pair(c, R - 1 - r); },
+      [C](int r, int c) { return make_pair(C - 1 - c, r); },
+      [C](int r, int c) { return make_pair(r, C - 1 - c); },
+      [R](int r, int c) { return make_pair(R - 1 - r, c); },
+      [](int r, int c) { return make_pair(c, r); },
+      [R, C](int r, int c) { return make_pair(C - 1 - c, R - 1 - r); },
+  };
+
+  g_numSymm = 0;
+  for (int t = 0; t < 8; t++) {
+    int perm[49];
+    bool valid = true;
+    for (int i = 0; i < g_numPos && valid; i++) {
+      auto [r, c] = GRID.positions[i];
+      auto [nr, nc] = transforms[t](r, c);
+      auto it = GRID.coordToIdx.find({nr, nc});
+      if (it == GRID.coordToIdx.end())
+        valid = false;
+      else
+        perm[i] = it->second;
+    }
+    if (valid) {
+      for (int i = 0; i < g_numPos; i++)
+        g_symmPerm[g_numSymm][i] = perm[i];
+      g_numSymm++;
+    }
+  }
+  cout << "Symmetries detected: " << g_numSymm << "  (search space reduced ~"
+       << g_numSymm << "x)\n";
+}
 
 static void buildLookupTables() {
   g_numPos = GRID.numPositions();
@@ -67,6 +136,42 @@ inline bool canPlace(uint64_t state, int pos, int type) {
   return (present & g_requiredMask[type]) == g_requiredMask[type];
 }
 
+// ── Path reconstruction ────────────────────────────────────────────────────
+// Canonical-aware: all intermediate states are canonicalized so they match
+// the transitions stored in the visited map (which live in canonical space).
+
+template <typename MapType>
+inline void printBuildPath(uint64_t bestState, const MapType &visited) {
+  vector<pair<int, int>> steps; // (pos, newType)
+  uint64_t cur = bestState;
+  while (visited.at(cur).pos != -1) {
+    const auto &tr = visited.at(cur);
+    steps.push_back({tr.pos, tr.type});
+    cur = tr.parent;
+  }
+  reverse(steps.begin(), steps.end());
+
+  cout << "\n--- Build path (" << steps.size() << " steps) ---\n\n";
+
+  uint64_t state = 0;
+  cout << "Start:\n";
+  printGrid(state);
+
+  for (int i = 0; i < (int)steps.size(); i++) {
+    int pos = steps[i].first;
+    int newType = steps[i].second;
+    int oldType = stateGet(state, pos);
+    // Canonicalize so intermediate state matches the next transition's parent
+    state = canonical(stateSet(state, pos, newType));
+
+    cout << "\nStep " << (i + 1) << ": pos " << pos << "  " << COLORS[oldType]
+         << BLACK_TEXT << COLOR_NAMES[oldType] << RESET << " (" << oldType
+         << ") -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType]
+         << RESET << " (" << newType << ")\n";
+    printGrid(state);
+  }
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 int main() {
@@ -79,20 +184,20 @@ int main() {
   cout << "\nRunning BFS over all reachable states...\n\n";
 
   buildLookupTables();
+  buildSymmetries();
 
   // BFS: every state is visited exactly once.
   // Queue stores (state, score) pairs so score is never recomputed.
   // A flat vector with a head index is a single contiguous allocation,
   // avoiding std::deque's chunked heap blocks.
   robin_hood::unordered_map<uint64_t, Transition> visited;
-  visited.reserve(1 << 23);
 
   struct Entry {
     uint64_t state;
     int score;
   };
   vector<Entry> q;
-  q.reserve(1 << 23);
+  q.reserve(1 << 28);
   size_t head = 0;
 
   uint64_t startState = 0;
@@ -123,7 +228,7 @@ int main() {
         if (!canPlace(cur, pos, newType))
           continue;
 
-        uint64_t next = stateSet(cur, pos, newType);
+        uint64_t next = canonical(stateSet(cur, pos, newType));
         int nextScore = curScore + (newType - curType);
         auto [it, inserted] = visited.try_emplace(
             next, Transition{cur, (int8_t)pos, (int8_t)newType});
