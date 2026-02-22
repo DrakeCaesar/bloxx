@@ -86,8 +86,8 @@ int main() {
           continue;
 
         uint64_t next = stateSet(cur, pos, newType);
-        if (!visited.count(next)) {
-          visited[next] = {cur, (int8_t)pos, (int8_t)newType};
+        if (visited.insert({next, {cur, (int8_t)pos, (int8_t)newType}})
+                .second) {
           q.push(next);
         }
       }
