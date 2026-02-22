@@ -198,6 +198,8 @@ bfsShortestPath(uint64_t target) {
       break;
     for (int pos = 0; pos < g_numPos; pos++) {
       int curType = stateGet(cur, pos);
+      if (curType == 4)
+        continue; // Type 4 is never a requirement, no point downgrading
       uint32_t present = neighborPresent(cur, pos);
       for (int newType = 0; newType <= g_maxType[pos]; newType++) {
         if (newType == curType)
@@ -250,6 +252,8 @@ static SearchResult runIDDFS() {
 
       for (int pos = 0; pos < g_numPos; pos++) {
         int curType = stateGet(cur.state, pos);
+        if (curType == 4)
+          continue; // Type 4 is never a requirement, no point downgrading
         uint32_t present = neighborPresent(cur.state, pos);
         for (int newType = 0; newType <= g_maxType[pos]; newType++) {
           if (newType == curType)
@@ -342,6 +346,8 @@ int main() {
       // Try every possible single-position change
       for (int pos = 0; pos < g_numPos; pos++) {
         int curType = stateGet(cur, pos);
+        if (curType == 4)
+          continue; // Type 4 is never a requirement, no point downgrading
         uint32_t present = neighborPresent(cur, pos); // computed once per pos
         for (int newType = 0; newType <= g_maxType[pos]; newType++) {
           if (newType == curType)
