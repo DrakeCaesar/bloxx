@@ -1,186 +1,215 @@
 #include <algorithm>
 #include <iostream>
-#include <set>
+#include <queue>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace std;
 
 // ANSI color codes
 const string COLORS[] = {
-    "\033[34m", // Blue for type 0
-    "\033[31m", // Red for type 1
-    "\033[32m", // Green for type 2
-    "\033[33m", // Yellow for type 3
-    "\033[37m"  // White for type 4
+    "\033[34m", // Blue   - type 0
+    "\033[31m", // Red    - type 1
+    "\033[32m", // Green  - type 2
+    "\033[33m", // Yellow - type 3
+    "\033[37m"  // White  - type 4
 };
+const string COLOR_NAMES[] = {"Blue", "Red", "Green", "Yellow", "White"};
 const string RESET = "\033[0m";
 
-// Grid is 4x4 without corners
+// Grid layout (orthogonal adjacency only):
 //   X  0  1  X
 //   2  3  4  5
 //   6  7  8  9
 //   X  10 11 X
-// Total 12 positions (all start as type 0)
 
-struct State {
-  int towers[12];
-
-  State() {
-    for (int i = 0; i < 12; i++)
-      towers[i] = 0; // All start as type 0 (base state)
-  }
-
-  int &operator[](int i) { return towers[i]; }
-  const int &operator[](int i) const { return towers[i]; }
-
-  int getScore() const {
-    int score = 0;
-    for (int i = 0; i < 12; i++) {
-      score += towers[i];
-    }
-    return score;
-  }
-
-  bool operator<(const State &other) const {
-    for (int i = 0; i < 12; i++) {
-      if (towers[i] != other[i])
-        return towers[i] < other[i];
-    }
-    return false;
-  }
-};
-
-// Neighbor lookup
 const vector<int> NEIGHBORS[12] = {
-    {1, 2, 3},            // 0
-    {0, 3, 4, 5},         // 1
-    {0, 3, 6},            // 2
-    {0, 1, 2, 4, 6, 7},   // 3
-    {1, 3, 5, 7, 8},      // 4
-    {1, 4, 8, 9},         // 5
-    {2, 3, 7, 10},        // 6
-    {3, 4, 6, 8, 10, 11}, // 7
-    {4, 5, 7, 9, 11},     // 8
-    {5, 8, 11},           // 9
-    {6, 7, 11},           // 10
-    {7, 8, 9, 10}         // 11
+    {1, 3},        // 0
+    {0, 4},        // 1
+    {3, 6},        // 2
+    {0, 2, 4, 7},  // 3
+    {1, 3, 5, 8},  // 4
+    {4, 9},        // 5
+    {2, 7},        // 6
+    {3, 6, 8, 10}, // 7
+    {4, 7, 9, 11}, // 8
+    {5, 8},        // 9
+    {7, 11},       // 10
+    {8, 10}        // 11
 };
 
-// Check if we can place a tower at position
-bool canPlace(const State &state, int pos, int type) {
+// Max achievable type = min(neighbor count, 4)
+const int MAX_TYPE[12] = {
+    2, // 0:  2 neighbors
+    2, // 1:  2 neighbors
+    2, // 2:  2 neighbors
+    4, // 3:  4 neighbors
+    4, // 4:  4 neighbors
+    2, // 5:  2 neighbors
+    2, // 6:  2 neighbors
+    4, // 7:  4 neighbors
+    4, // 8:  4 neighbors
+    2, // 9:  2 neighbors
+    2, // 10: 2 neighbors
+    2  // 11: 2 neighbors
+};
+
+// ── State packing ──────────────────────────────────────────────────────────
+// Each position stores a value 0-4 (fits in 3 bits).
+// 12 positions × 3 bits = 36 bits → fits in uint64_t.
+
+inline uint64_t stateSet(uint64_t s, int pos, int val) {
+  s &= ~(uint64_t(7) << (pos * 3));
+  s |= uint64_t(val) << (pos * 3);
+  return s;
+}
+inline int stateGet(uint64_t s, int pos) { return (s >> (pos * 3)) & 7; }
+inline int stateScore(uint64_t s) {
+  int total = 0;
+  for (int i = 0; i < 12; i++)
+    total += stateGet(s, i);
+  return total;
+}
+
+// ── Placement rule ─────────────────────────────────────────────────────────
+// Tower of type T at pos requires one neighbor of each type 0..T-1.
+
+bool canPlace(uint64_t state, int pos, int type) {
   if (type == 0)
     return true;
-
-  // Need neighbors of types 0, 1, ..., type-1
-  bool hasType[5] = {false};
-  for (int neighbor : NEIGHBORS[pos]) {
-    hasType[state[neighbor]] = true;
-  }
-
-  // Check all required types are present
-  for (int i = 0; i < type; i++) {
-    if (!hasType[i])
+  bool has[5] = {};
+  for (int n : NEIGHBORS[pos])
+    has[stateGet(state, n)] = true;
+  for (int i = 0; i < type; i++)
+    if (!has[i])
       return false;
-  }
-
   return true;
 }
 
-// Print state
-void printState(const State &state, int score) {
-  cout << "\n=== New Best Score: " << score << " ===\n";
-  cout << "  X  ";
-  cout << COLORS[state[0]] << state[0] << RESET << "  ";
-  cout << COLORS[state[1]] << state[1] << RESET << "  X\n";
+// ── Grid display ───────────────────────────────────────────────────────────
 
+void printGrid(uint64_t s) {
+  auto cell = [&](int pos) {
+    int t = stateGet(s, pos);
+    return COLORS[t] + to_string(t) + RESET;
+  };
+  cout << "  X  " << cell(0) << "  " << cell(1) << "  X\n";
   cout << "  ";
-  for (int i = 2; i <= 5; i++) {
-    cout << COLORS[state[i]] << state[i] << RESET << "  ";
-  }
-  cout << "\n";
-
-  cout << "  ";
-  for (int i = 6; i <= 9; i++) {
-    cout << COLORS[state[i]] << state[i] << RESET << "  ";
-  }
-  cout << "\n";
-
-  cout << "  X  ";
-  cout << COLORS[state[10]] << state[10] << RESET << "  ";
-  cout << COLORS[state[11]] << state[11] << RESET << "  X\n";
-  cout << "=============================\n";
+  for (int i = 2; i <= 5; i++)
+    cout << cell(i) << "  ";
+  cout << "\n  ";
+  for (int i = 6; i <= 9; i++)
+    cout << cell(i) << "  ";
+  cout << "\n  X  " << cell(10) << "  " << cell(11) << "  X\n";
 }
 
-// Global tracking
-int bestScore = -1;
-State bestState;
-long long statesExplored = 0;
-const int MAX_DEPTH = 10; // Depth limit instead of visited set
+// ── Path reconstruction ────────────────────────────────────────────────────
 
-// Simple DFS exploration with depth limit
-void dfs(State &current, int depth) {
-  statesExplored++;
+struct Transition {
+  uint64_t parent;
+  int8_t pos;  // position changed (-1 = start sentinel)
+  int8_t type; // new type applied
+};
 
-  // Check if this is a new best
-  int score = current.getScore();
-  if (score > bestScore) {
-    bestScore = score;
-    bestState = current;
-    printState(current, score);
+void printBuildPath(uint64_t bestState,
+                    const unordered_map<uint64_t, Transition> &visited) {
+  // Walk back from best state to start
+  vector<pair<int, int>> steps; // (pos, newType)
+  uint64_t cur = bestState;
+  while (visited.at(cur).pos != -1) {
+    const auto &tr = visited.at(cur);
+    steps.push_back({tr.pos, tr.type});
+    cur = tr.parent;
   }
+  reverse(steps.begin(), steps.end());
 
-  // Progress indicator
-  if (statesExplored % 100000 == 0) {
-    cout << "Explored: " << statesExplored << " states | Best: " << bestScore
-         << " | Depth: " << depth << "\r" << flush;
-  }
+  cout << "\n--- Build path (" << steps.size() << " steps) ---\n\n";
 
-  // Stop if depth limit reached
-  if (depth >= MAX_DEPTH)
-    return;
+  uint64_t state = 0; // start: all type 0
+  cout << "Start:\n";
+  printGrid(state);
 
-  // Try upgrading or downgrading each position
-  for (int pos = 0; pos < 12; pos++) {
-    int currentType = current[pos];
+  for (int i = 0; i < (int)steps.size(); i++) {
+    int pos = steps[i].first;
+    int newType = steps[i].second;
+    int oldType = stateGet(state, pos);
+    state = stateSet(state, pos, newType);
 
-    // Try all different types (0-4)
-    for (int newType = 0; newType <= 4; newType++) {
-      if (newType != currentType && canPlace(current, pos, newType)) {
-        current[pos] = newType;
-        dfs(current, depth + 1);
-        current[pos] = currentType; // Backtrack
-      }
-    }
+    cout << "\nStep " << (i + 1) << ": pos " << pos << "  " << COLORS[oldType]
+         << COLOR_NAMES[oldType] << RESET << " (" << oldType << ") -> "
+         << COLORS[newType] << COLOR_NAMES[newType] << RESET << " (" << newType
+         << ")\n";
+    printGrid(state);
   }
 }
+
+// ── Main ───────────────────────────────────────────────────────────────────
 
 int main() {
-  cout << "Tower Blox Deluxe Solver - Simple DFS\n";
-  cout << "======================================\n";
-  cout << "Tower Types:\n";
-  cout << "  " << COLORS[0] << "0" << RESET
-       << " (Blue)   - Base state (no requirements)\n";
-  cout << "  " << COLORS[1] << "1" << RESET << " (Red)    - Needs 0 neighbor\n";
-  cout << "  " << COLORS[2] << "2" << RESET
-       << " (Green)  - Needs 0 and 1 neighbors\n";
-  cout << "  " << COLORS[3] << "3" << RESET
-       << " (Yellow) - Needs 0, 1, and 2 neighbors\n";
-  cout << "  " << COLORS[4] << "4" << RESET
-       << " (White)  - Needs 0, 1, 2, and 3 neighbors\n";
-  cout << "\nNote: All positions start at type 0 (base state).\n";
-  cout << "Algorithm tries upgrading/downgrading each position.\n";
-  cout << "\nStarting DFS exploration from all type 0 (base state)...\n\n";
+  cout << "Tower Blox Deluxe Solver\n";
+  cout << "========================\n";
+  cout << "Tower types:\n";
+  for (int i = 0; i <= 4; i++)
+    cout << "  " << COLORS[i] << i << RESET << " (" << COLOR_NAMES[i] << ")\n";
+  cout << "\nRunning BFS over all reachable states...\n\n";
 
-  State start;
-  dfs(start, 0);
+  // BFS: every state is visited exactly once
+  unordered_map<uint64_t, Transition> visited;
+  visited.reserve(1 << 23); // pre-allocate ~8M buckets
+  queue<uint64_t> q;
 
-  cout << "\n\nExploration Complete!\n";
-  cout << "States explored: " << statesExplored << "\n";
-  cout << "Best score: " << bestScore << "\n\n";
+  uint64_t startState = 0;
+  visited[startState] = {0, -1, -1}; // sentinel
+  q.push(startState);
 
-  cout << "Final best layout:\n";
-  printState(bestState, bestScore);
+  uint64_t bestState = startState;
+  int bestScore = 0;
+  long long explored = 0;
+
+  while (!q.empty()) {
+    uint64_t cur = q.front();
+    q.pop();
+    explored++;
+
+    int score = stateScore(cur);
+    if (score > bestScore) {
+      bestScore = score;
+      bestState = cur;
+      cout << "New best score: " << bestScore << "\n";
+      printGrid(cur);
+    }
+
+    // Try every possible single-position change
+    for (int pos = 0; pos < 12; pos++) {
+      int curType = stateGet(cur, pos);
+      for (int newType = 0; newType <= MAX_TYPE[pos]; newType++) {
+        if (newType == curType)
+          continue;
+        if (!canPlace(cur, pos, newType))
+          continue;
+
+        uint64_t next = stateSet(cur, pos, newType);
+        if (!visited.count(next)) {
+          visited[next] = {cur, (int8_t)pos, (int8_t)newType};
+          q.push(next);
+        }
+      }
+    }
+
+    if (explored % 200000 == 0)
+      cout << "Explored: " << explored << " | Visited: " << visited.size()
+           << " | Best: " << bestScore << "\r" << flush;
+  }
+
+  cout << "\nBFS complete.\n";
+  cout << "States explored : " << explored << "\n";
+  cout << "Unique states   : " << visited.size() << "\n";
+  cout << "Best score      : " << bestScore << "\n\n";
+  cout << "Optimal layout:\n";
+  printGrid(bestState);
+
+  printBuildPath(bestState, visited);
 
   return 0;
 }
