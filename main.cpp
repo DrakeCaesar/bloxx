@@ -9,14 +9,15 @@ using namespace std;
 
 // ANSI color codes
 const string COLORS[] = {
-    "\033[34m", // Blue   - type 0
-    "\033[31m", // Red    - type 1
-    "\033[32m", // Green  - type 2
-    "\033[33m", // Yellow - type 3
-    "\033[37m"  // White  - type 4
+    "\033[44m", // Blue background   - type 0
+    "\033[41m", // Red background    - type 1
+    "\033[42m", // Green background  - type 2
+    "\033[43m", // Yellow background - type 3
+    "\033[47m"  // White background  - type 4
 };
 const string COLOR_NAMES[] = {"Blue", "Red", "Green", "Yellow", "White"};
 const string RESET = "\033[0m";
+const string BLACK_TEXT = "\033[30m"; // Black text for number
 
 // Grid layout (orthogonal adjacency only):
 //   X  0  1  X
@@ -92,16 +93,14 @@ bool canPlace(uint64_t state, int pos, int type) {
 void printGrid(uint64_t s) {
   auto cell = [&](int pos) {
     int t = stateGet(s, pos);
-    return COLORS[t] + to_string(t) + RESET;
+    return COLORS[t] + BLACK_TEXT + to_string(t) + RESET;
   };
-  cout << "  X  " << cell(0) << "  " << cell(1) << "  X\n";
-  cout << "  ";
-  for (int i = 2; i <= 5; i++)
-    cout << cell(i) << "  ";
-  cout << "\n  ";
-  for (int i = 6; i <= 9; i++)
-    cout << cell(i) << "  ";
-  cout << "\n  X  " << cell(10) << "  " << cell(11) << "  X\n";
+  cout << "    " << cell(0) << " " << cell(1) << "\n";
+  cout << "  " << cell(2) << " " << cell(3) << " " << cell(4) << " " << cell(5)
+       << "\n";
+  cout << "  " << cell(6) << " " << cell(7) << " " << cell(8) << " " << cell(9)
+       << "\n";
+  cout << "    " << cell(10) << " " << cell(11) << "\n";
 }
 
 // ── Path reconstruction ────────────────────────────────────────────────────
@@ -137,9 +136,9 @@ void printBuildPath(uint64_t bestState,
     state = stateSet(state, pos, newType);
 
     cout << "\nStep " << (i + 1) << ": pos " << pos << "  " << COLORS[oldType]
-         << COLOR_NAMES[oldType] << RESET << " (" << oldType << ") -> "
-         << COLORS[newType] << COLOR_NAMES[newType] << RESET << " (" << newType
-         << ")\n";
+         << BLACK_TEXT << COLOR_NAMES[oldType] << RESET << " (" << oldType
+         << ") -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType]
+         << RESET << " (" << newType << ")\n";
     printGrid(state);
   }
 }
@@ -151,7 +150,8 @@ int main() {
   cout << "========================\n";
   cout << "Tower types:\n";
   for (int i = 0; i <= 4; i++)
-    cout << "  " << COLORS[i] << i << RESET << " (" << COLOR_NAMES[i] << ")\n";
+    cout << "  " << COLORS[i] << BLACK_TEXT << i << RESET << " ("
+         << COLOR_NAMES[i] << ")\n";
   cout << "\nRunning BFS over all reachable states...\n\n";
 
   // BFS: every state is visited exactly once
