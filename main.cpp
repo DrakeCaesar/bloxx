@@ -1,6 +1,6 @@
 #include <iostream>
-#include <unordered_map>
 #include <vector>
+#include <robin_hood.h>
 
 #include "grid.h"
 
@@ -84,7 +84,7 @@ int main() {
   // Queue stores (state, score) pairs so score is never recomputed.
   // A flat vector with a head index is a single contiguous allocation,
   // avoiding std::deque's chunked heap blocks.
-  unordered_map<uint64_t, Transition> visited;
+  robin_hood::unordered_map<uint64_t, Transition> visited;
   visited.reserve(1 << 23);
 
   struct Entry {
@@ -125,8 +125,8 @@ int main() {
 
         uint64_t next = stateSet(cur, pos, newType);
         int nextScore = curScore + (newType - curType);
-        if (visited.insert({next, {cur, (int8_t)pos, (int8_t)newType}})
-                .second) {
+        auto [it, inserted] = visited.try_emplace(next, Transition{cur, (int8_t)pos, (int8_t)newType});
+        if (inserted) {
           q.push_back({next, nextScore});
         }
       }

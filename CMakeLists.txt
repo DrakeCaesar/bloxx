@@ -11,4 +11,13 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /arch:AVX2")
 # Parallel compilation
 add_compile_options(/MP)
 
+# Robin-hood hashing library
+include(FetchContent)
+FetchContent_Declare(robin_hood 
+  GIT_REPOSITORY https://github.com/martinus/robin-hood-hashing.git
+  GIT_TAG 3.11.5
+)
+FetchContent_MakeAvailable(robin_hood)
+
 add_executable(tower_solver main.cpp)
+target_link_libraries(tower_solver PRIVATE robin_hood::robin_hood)

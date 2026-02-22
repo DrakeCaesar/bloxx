@@ -177,8 +177,8 @@ struct Transition {
   int8_t type; // new type applied
 };
 
-inline void printBuildPath(uint64_t bestState,
-                           const unordered_map<uint64_t, Transition> &visited) {
+template <typename MapType>
+inline void printBuildPath(uint64_t bestState, const MapType &visited) {
   // Walk back from best state to start
   vector<pair<int, int>> steps; // (pos, newType)
   uint64_t cur = bestState;
