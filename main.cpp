@@ -287,8 +287,8 @@ static SearchResult runIDDFS() {
 int main() {
   cout << "Tower Blox Deluxe Solver\n";
   cout << "========================\n";
-  cout << "Tower types:\n";
-  for (int i = 0; i <= 4; i++)
+  cout << "Tower types unlocked (0-" << MAX_UNLOCKED_TYPE << "):\n";
+  for (int i = 0; i <= MAX_UNLOCKED_TYPE; i++)
     cout << "  " << COLORS[i] << BLACK_TEXT << i << RESET << " ("
          << COLOR_NAMES[i] << ")\n";
   if (SEARCH_MODE == 0)

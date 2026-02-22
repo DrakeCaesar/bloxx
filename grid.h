@@ -54,23 +54,39 @@ struct GridConfig {
     }
   }
 
-  void computeMaxTypes() {
+  void computeMaxTypes(int maxUnlockedType = 4) {
     maxType.clear();
     maxType.resize(numPositions());
     for (int i = 0; i < numPositions(); i++) {
-      maxType[i] = min(4, (int)neighbors[i].size());
+      // Max type is limited by: neighbors available AND towers unlocked
+      maxType[i] = min(maxUnlockedType, min(4, (int)neighbors[i].size()));
     }
   }
 
-  void build() {
+  void build(int maxUnlockedType = 4) {
     coordToIdx.clear();
     for (int i = 0; i < numPositions(); i++) {
       coordToIdx[positions[i]] = i;
     }
     computeNeighbors();
-    computeMaxTypes();
+    computeMaxTypes(maxUnlockedType);
   }
 };
+
+// ══════════════════════════════════════════════════════════════════════════
+// Configuration Constants
+// ══════════════════════════════════════════════════════════════════════════
+
+const int LEVEL = 2;
+// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS)
+const int SEARCH_MODE = 1;
+// Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
+// Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
+const int MAX_UNLOCKED_TYPE = 4;
+
+// ══════════════════════════════════════════════════════════════════════════
+// Grid Creation
+// ══════════════════════════════════════════════════════════════════════════
 
 // Create grid from string pattern
 // '.' = valid position, ' ' or '#' = blank/invalid
@@ -90,7 +106,7 @@ inline GridConfig createGridFromPattern(const vector<string> &pattern) {
     }
   }
 
-  g.build();
+  g.build(MAX_UNLOCKED_TYPE);
   return g;
 }
 
@@ -116,10 +132,6 @@ inline GridConfig createLevel5Grid() {
   return createGridFromPattern({"    ...", " ......", " ......", " .. .. ",
                                 "...... ", "...... ", "...    "});
 };
-
-const int LEVEL = 2;
-// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS)
-const int SEARCH_MODE = 1;
 
 inline GridConfig createGrid() {
   switch (LEVEL) {
