@@ -72,23 +72,6 @@ struct GridConfig {
   }
 };
 
-// Default: 4x4 grid without corners (Tower Blox Deluxe first level)
-GridConfig createDefaultGrid() {
-  GridConfig g;
-  g.rows = 4;
-  g.cols = 4;
-  g.positions = {
-      {0, 1}, {0, 2},                 // row 0: positions 0, 1
-      {1, 0}, {1, 1}, {1, 2}, {1, 3}, // row 1: positions 2, 3, 4, 5
-      {2, 0}, {2, 1}, {2, 2}, {2, 3}, // row 2: positions 6, 7, 8, 9
-      {3, 1}, {3, 2}                  // row 3: positions 10, 11
-  };
-  g.build();
-  return g;
-}
-
-GridConfig GRID = createDefaultGrid();
-
 // Create grid from string pattern
 // '.' = valid position, ' ' or '#' = blank/invalid
 GridConfig createGridFromPattern(const vector<string> &pattern) {
@@ -110,6 +93,13 @@ GridConfig createGridFromPattern(const vector<string> &pattern) {
   g.build();
   return g;
 }
+
+// Default: 4x4 grid without corners (Tower Blox Deluxe first level)
+GridConfig createDefaultGrid() {
+  return createGridFromPattern({" .. ", "....", "....", " .. "});
+}
+
+GridConfig GRID = createDefaultGrid();
 
 // Example patterns
 GridConfig createSmallGrid() { return createGridFromPattern({"..", ".."}); }
