@@ -1,5 +1,4 @@
 #include <iostream>
-#include <queue>
 #include <unordered_map>
 #include <vector>
 
@@ -81,27 +80,35 @@ int main() {
 
   buildLookupTables();
 
-  // BFS: every state is visited exactly once
+  // BFS: every state is visited exactly once.
+  // Queue stores (state, score) pairs so score is never recomputed.
+  // A flat vector with a head index is a single contiguous allocation,
+  // avoiding std::deque's chunked heap blocks.
   unordered_map<uint64_t, Transition> visited;
-  visited.reserve(1 << 23); // pre-allocate ~8M buckets
-  queue<uint64_t> q;
+  visited.reserve(1 << 23);
+
+  struct Entry {
+    uint64_t state;
+    int score;
+  };
+  vector<Entry> q;
+  q.reserve(1 << 23);
+  size_t head = 0;
 
   uint64_t startState = 0;
-  visited[startState] = {0, -1, -1}; // sentinel
-  q.push(startState);
+  visited[startState] = {0, -1, -1};
+  q.push_back({startState, 0});
 
   uint64_t bestState = startState;
   int bestScore = 0;
   long long explored = 0;
 
-  while (!q.empty()) {
-    uint64_t cur = q.front();
-    q.pop();
+  while (head < q.size()) {
+    auto [cur, curScore] = q[head++];
     explored++;
 
-    int score = stateScore(cur);
-    if (score > bestScore) {
-      bestScore = score;
+    if (curScore > bestScore) {
+      bestScore = curScore;
       bestState = cur;
       cout << "New best score: " << bestScore << "\n";
       printGrid(cur);
@@ -117,9 +124,10 @@ int main() {
           continue;
 
         uint64_t next = stateSet(cur, pos, newType);
+        int nextScore = curScore + (newType - curType);
         if (visited.insert({next, {cur, (int8_t)pos, (int8_t)newType}})
                 .second) {
-          q.push(next);
+          q.push_back({next, nextScore});
         }
       }
     }
