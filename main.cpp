@@ -18,6 +18,7 @@ static int g_numPos;
 static int g_neighborShifts[49][4]; // precomputed: neighborIndex * 3
 static int g_neighborCount[49];
 static int g_maxType[49];
+static const uint32_t g_requiredMask[5] = {0, 1, 3, 7, 15}; // (1<<type)-1
 
 static void buildLookupTables() {
   g_numPos = GRID.numPositions();
@@ -62,9 +63,8 @@ inline bool canPlace(uint64_t state, int pos, int type) {
   int count = g_neighborCount[pos];
   for (int i = 0; i < count; i++)
     present |= 1u << ((state >> shifts[i]) & 7);
-  // Need all of types 0..type-1: required mask = (1<<type)-1
-  uint32_t required = (1u << type) - 1;
-  return (present & required) == required;
+  // Need all of types 0..type-1: use precomputed mask
+  return (present & g_requiredMask[type]) == g_requiredMask[type];
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────
