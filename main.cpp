@@ -94,27 +94,34 @@ GridConfig createGridFromPattern(const vector<string> &pattern) {
   return g;
 }
 
-// Default: 4x4 grid without corners (Tower Blox Deluxe first level)
-GridConfig createDefaultGrid() {
+// Game grids (Tower Blox Deluxe levels)
+GridConfig createLevel1Grid() {
   return createGridFromPattern({" .. ", "....", "....", " .. "});
 }
 
-GridConfig GRID = createDefaultGrid();
-
-// Example patterns
-GridConfig createSmallGrid() { return createGridFromPattern({"..", ".."}); }
-
-GridConfig createCrossGrid() {
-  return createGridFromPattern({" . ", "...", " . "});
+GridConfig createLevel2Grid() {
+  return createGridFromPattern({"....", "....", "....", "...."});
 }
 
-GridConfig createLargeGrid() {
-  return createGridFromPattern({".....", ".....", ".....", ".....", "....."});
+GridConfig createLevel3Grid() {
+  return createGridFromPattern({".....", ".....", "  .  ", ".....", "....."});
 }
 
-GridConfig createCustomGrid() {
-  return createGridFromPattern({" ... ", ".....", ".....", ".....", " ... "});
+// Select which level to solve (1, 2, or 3)
+const int LEVEL = 2;
+
+GridConfig createGrid() {
+  switch (LEVEL) {
+  case 2:
+    return createLevel2Grid();
+  case 3:
+    return createLevel3Grid();
+  default:
+    return createLevel1Grid();
+  }
 }
+
+GridConfig GRID = createGrid();
 
 // ── State packing ──────────────────────────────────────────────────────────
 // Each position stores a value 0-4 (fits in 3 bits).
