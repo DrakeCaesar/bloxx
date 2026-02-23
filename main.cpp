@@ -332,18 +332,20 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
   struct Entry {
     StateType state;
     int score;
+    int depth;
   };
   vector<Entry> q;
   
   localVisited.insert(startState);
-  q.push_back({startState, scoreGrid(startState)});
+  q.push_back({startState, scoreGrid(startState), 0});
   size_t head = 0;
   
-  bool limitReached = false;
-  
-  while (head < q.size() && localVisited.size() < (size_t)MAX_STATES_PER_WINDOW) {
-    auto [cur, curScore] = q[head++];
+  while (head < q.size()) {
+    auto [cur, curScore, depth] = q[head++];
     explored++;
+    
+    // Stop expanding this branch if we've reached max depth
+    if (depth >= MAX_DEPTH) continue;
     
     if (curScore > bestScore) {
       bestScore = curScore;
@@ -368,17 +370,10 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
         // Only track within this window to prevent infinite loops
         if (localVisited.insert(next).second) {
           int nextScore = curScore + (newType - curType);
-          q.push_back({next, nextScore});
+          q.push_back({next, nextScore, depth + 1});
           newStates.push_back(next);
-          
-          // Check limit after each insertion
-          if (localVisited.size() >= (size_t)MAX_STATES_PER_WINDOW) {
-            limitReached = true;
-            break;
-          }
         }
       }
-      if (limitReached) break;
     }
   }
   // localVisited is destroyed here - no global state persists
@@ -389,11 +384,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
   
   if (verbose && statesGenerated > 0) {
     cout << " -> explored " << windowStatesExplored << " states (" 
-         << movesTried << " moves), generated " << statesGenerated << " new";
-    if (limitReached) {
-      cout << " [LIMIT REACHED]";
-    }
-    cout << "\n";
+         << movesTried << " moves), generated " << statesGenerated << " new\n";
   } else if (verbose) {
     cout << " -> explored " << windowStatesExplored << " states, no new\n";
   }
@@ -403,108 +394,37 @@ static SearchResult runSlidingWindow() {
   SearchResult result{0, 0, 0, 0};
   vector<int> zigzag = buildZigzagPath();
   
-  // Track states with their scores for intelligent frontier management
-  struct ScoredState {
-    StateType state;
-    int score;
-  };
-  vector<ScoredState> frontier;
-  robin_hood::unordered_set<StateType> frontierSet; // For deduplication
-  
-  StateType startState = 0;
-  frontier.push_back({startState, 0});
-  frontierSet.insert(startState);
-  
-  result.bestState = startState;
+  StateType currentState = 0;
+  result.bestState = currentState;
   result.bestScore = 0;
   result.explored = 0;
   
-  cout << "Sliding window with exhaustive BFS per window:\n";
+  cout << "Sliding window - sequential greedy approach:\n";
   for (const auto &row : WINDOW_KERNEL_PATTERN) {
     cout << "  " << row << "\n";
   }
   cout << "Zigzag path length: " << zigzag.size() << "\n";
-  cout << "Each window explores ALL reachable states by modifying kernel positions\n\n";
+  cout << "For each position: explore all reachable states, keep best, move on\n\n";
   
-  for (int pass = 0; pass < NUM_WINDOW_PASSES && !frontier.empty(); pass++) {
-    cout << "\nPass " << (pass + 1) << ": " << frontier.size() << " states in frontier\n";
-    int bestScoreBeforePass = result.bestScore;
-    vector<StateType> allNewStates;
+  // Process each window position sequentially
+  for (int windowIdx = 0; windowIdx < (int)zigzag.size(); windowIdx++) {
+    vector<StateType> exploredStates;
     
-    // For each state in frontier, slide window through all positions
-    for (size_t stateIdx = 0; stateIdx < frontier.size(); stateIdx++) {
-      StateType state = frontier[stateIdx].state;
-      
-      if (frontier.size() <= 5) {
-        cout << "\nProcessing state " << (stateIdx + 1) << "/" << frontier.size() << ":\n";
-      }
-      
-      for (int windowIdx = 0; windowIdx < (int)zigzag.size(); windowIdx++) {
-        bool verbose = (frontier.size() <= 5); // Show details for small frontiers
-        
-        exploreWindow(state, windowIdx, allNewStates,
-                     result.bestScore, result.bestState, result.explored, verbose);
-        
-        if (!verbose && windowIdx % 3 == 0) {
-          cout << "." << flush;
-        }
-      }
-      
-      if (frontier.size() > 5 && stateIdx % max(1ul, frontier.size() / 10) == 0) {
-        cout << "\n  Processed " << (stateIdx + 1) << "/" << frontier.size() << " states" << flush;
-      }
-      
-      if (result.explored % 10000 == 0) {
-        cout << "Explored: " << result.explored << " | New states: " << allNewStates.size()
-             << " | Best: " << result.bestScore << "\r" << flush;
-      }
-    }
+    cout << "Position " << windowIdx << "/" << zigzag.size();
     
-    cout << "\nPass complete. Generated " << allNewStates.size() << " total states";
+    exploreWindow(currentState, windowIdx, exploredStates,
+                 result.bestScore, result.bestState, result.explored, true);
     
-    // Deduplicate and score all new states
-    robin_hood::unordered_map<StateType, int> stateScores;
-    for (StateType s : allNewStates) {
-      int score = scoreGrid(s);
-      auto it = stateScores.find(s);
-      if (it == stateScores.end() || score > it->second) {
-        stateScores[s] = score;
-      }
-    }
-    
-    // Convert to vector and sort by score
-    vector<ScoredState> scoredStates;
-    scoredStates.reserve(stateScores.size());
-    for (const auto& [state, score] : stateScores) {
-      scoredStates.push_back({state, score});
-    }
-    
-    sort(scoredStates.begin(), scoredStates.end(), 
-         [](const ScoredState& a, const ScoredState& b) {
-           return a.score > b.score; // Descending order
-         });
-    
-    // Keep only top N states for next pass
-    int keepCount = min((int)scoredStates.size(), TOP_STATES_FOR_NEXT_PASS);
-    frontier.clear();
-    frontierSet.clear();
-    
-    for (int i = 0; i < keepCount; i++) {
-      frontier.push_back(scoredStates[i]);
-      frontierSet.insert(scoredStates[i].state);
-    }
-    
-    cout << " (unique: " << stateScores.size() << ")";
-    cout << "\n  Keeping top " << frontier.size() << " states for next pass";
-    cout << " | Best score: " << result.bestScore << "\n";
-    
-    // Early termination: if best didn't improve, next pass would be the same
-    if (result.bestScore == bestScoreBeforePass) {
-      cout << "  No improvement in this pass - stopping early\n";
-      break;
+    // If we found a better state, use it; otherwise keep current
+    if (result.bestState != currentState) {
+      currentState = result.bestState;
+      cout << "  -> Updated current state (score: " << result.bestScore << ")\n";
+    } else {
+      cout << "  -> No improvement\n";
     }
   }
   
+  cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0; // Not tracking globally
   return result;
 }
@@ -590,8 +510,7 @@ int main() {
   else if (SEARCH_MODE == 2)
     cout << "\nRunning IDDFS over all reachable states...\n\n";
   else
-    cout << "\nRunning sliding window optimization (" << NUM_WINDOW_PASSES
-         << " passes)...\n\n";
+    cout << "\nRunning sliding window optimization (sequential greedy)...\n\n";
 
   buildLookupTables();
   buildSymmetries();
