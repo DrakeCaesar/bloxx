@@ -22,6 +22,46 @@
       "ctestCommandArgs": "",
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "variables": []
+    },
+    {
+      "name": "Linux-Debug",
+      "generator": "Unix Makefiles",
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}/build/${name}",
+      "installRoot": "${projectDir}/install/${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "variables": [
+        {
+          "name": "CMAKE_C_COMPILER",
+          "value": "gcc"
+        },
+        {
+          "name": "CMAKE_CXX_COMPILER",
+          "value": "g++"
+        }
+      ]
+    },
+    {
+      "name": "Linux-Release",
+      "generator": "Unix Makefiles",
+      "configurationType": "Release",
+      "buildRoot": "${projectDir}/build/${name}",
+      "installRoot": "${projectDir}/install/${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "variables": [
+        {
+          "name": "CMAKE_C_COMPILER",
+          "value": "gcc"
+        },
+        {
+          "name": "CMAKE_CXX_COMPILER",
+          "value": "g++"
+        }
+      ]
     }
   ]
 }

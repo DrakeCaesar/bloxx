@@ -11,8 +11,8 @@ using namespace std;
 namespace robin_hood {
 template <> struct hash<uint128_simd> {
   size_t operator()(const uint128_simd &x) const noexcept {
-    uint64_t lo = _mm_cvtsi128_si64(x.value);
-    uint64_t hi = _mm_cvtsi128_si64(_mm_unpackhi_epi64(x.value, x.value));
+    uint64_t lo = (uint64_t)x;
+    uint64_t hi = (uint64_t)(x >> 64);
     return size_t(lo ^ hi);
   }
 };

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <emmintrin.h> // SSE2 intrinsics for __m128i
 #include <iostream>
 #include <map>
 #include <string>
@@ -16,87 +15,8 @@ using namespace std;
 // uint64_t: 64 bits / 3 = 21 positions max
 // Custom 128-bit using SIMD: 128 bits / 3 = 42 positions max
 
-// Custom 128-bit integer using SIMD intrinsics (works on MSVC)
-struct uint128_simd {
-  __m128i value;
-
-  uint128_simd() : value(_mm_setzero_si128()) {}
-  uint128_simd(__m128i v) : value(v) {}
-  uint128_simd(uint64_t v) : value(_mm_set_epi64x(0, v)) {}
-
-  operator __m128i() const { return value; }
-
-  uint128_simd operator|(const uint128_simd &other) const {
-    return _mm_or_si128(value, other.value);
-  }
-
-  uint128_simd operator&(const uint128_simd &other) const {
-    return _mm_and_si128(value, other.value);
-  }
-
-  uint128_simd operator~() const {
-    return _mm_xor_si128(value, _mm_set1_epi32(-1));
-  }
-
-  uint128_simd &operator|=(const uint128_simd &other) {
-    value = _mm_or_si128(value, other.value);
-    return *this;
-  }
-
-  uint128_simd &operator&=(const uint128_simd &other) {
-    value = _mm_and_si128(value, other.value);
-    return *this;
-  }
-
-  uint128_simd operator>>(int shift) const {
-    if (shift == 0)
-      return *this;
-    if (shift >= 128)
-      return uint128_simd(0);
-    if (shift >= 64) {
-      uint64_t hi = _mm_cvtsi128_si64(_mm_unpackhi_epi64(value, value));
-      return uint128_simd(hi >> (shift - 64));
-    }
-    // Shift within 128 bits
-    __m128i shifted = _mm_srli_epi64(value, shift);
-    // Handle carry from high to low
-    __m128i carry =
-        _mm_slli_epi64(_mm_unpackhi_epi64(value, value), 64 - shift);
-    return _mm_or_si128(shifted,
-                        _mm_unpacklo_epi64(carry, _mm_setzero_si128()));
-  }
-
-  uint128_simd operator<<(int shift) const {
-    if (shift == 0)
-      return *this;
-    if (shift >= 128)
-      return uint128_simd(0);
-    if (shift >= 64) {
-      uint64_t lo = _mm_cvtsi128_si64(value);
-      return _mm_set_epi64x(lo << (shift - 64), 0);
-    }
-    // Shift within 128 bits
-    __m128i shifted = _mm_slli_epi64(value, shift);
-    // Handle carry from low to high
-    uint64_t lo = _mm_cvtsi128_si64(value);
-    __m128i carry = _mm_set_epi64x(lo >> (64 - shift), 0);
-    return _mm_or_si128(shifted, carry);
-  }
-
-  bool operator<(const uint128_simd &other) const {
-    uint64_t this_hi = _mm_cvtsi128_si64(_mm_unpackhi_epi64(value, value));
-    uint64_t this_lo = _mm_cvtsi128_si64(value);
-    uint64_t other_hi =
-        _mm_cvtsi128_si64(_mm_unpackhi_epi64(other.value, other.value));
-    uint64_t other_lo = _mm_cvtsi128_si64(other.value);
-    return (this_hi < other_hi) || (this_hi == other_hi && this_lo < other_lo);
-  }
-
-  bool operator==(const uint128_simd &other) const {
-    __m128i cmp = _mm_cmpeq_epi32(value, other.value);
-    return _mm_movemask_epi8(cmp) == 0xFFFF;
-  }
-};
+// Use native __uint128_t (GCC/Clang compiler built-in)
+using uint128_simd = __uint128_t;
 
 using StateType64 = uint64_t;
 using StateType128 = uint128_simd;
