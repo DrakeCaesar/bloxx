@@ -91,14 +91,15 @@ struct GridConfig {
 // Configuration Constants
 // ══════════════════════════════════════════════════════════════════════════
 
-#define LEVEL 3  // Grid level (1-5), must be #define for preprocessor
+#define LEVEL 5  // Grid level (1-5), must be #define for preprocessor
 // 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 = Sliding Window
 [[maybe_unused]] const int SEARCH_MODE = 3;
 // Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
 // Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
 const int MAX_UNLOCKED_TYPE = 4;
 // Sliding window parameters
-const int MAX_DEPTH = 10;  // Maximum BFS depth per window
+const int MAX_DEPTH = 10;       // Maximum BFS depth per window
+const int SCAFFOLD_DEPTH = 10;   // Maximum BFS depth for scaffold search during path reconstruction
 
 // Kernel patterns: '.' = include in window, ' ' = exclude
 // Pattern is centered on the window position

@@ -574,7 +574,7 @@ static SearchResult runSlidingWindow() {
   // For each invalid step, BFS from current state to find a short sequence
   // of moves that makes the target placement valid. Then place the target.
   
-  const int SCAFFOLD_MAX_DEPTH = 5;
+  const int SCAFFOLD_MAX_DEPTH = SCAFFOLD_DEPTH;
   
   auto bfsFindScaffold = [&](StateType fromState, int targetPos, int targetType)
       -> vector<pair<int,int>> {
