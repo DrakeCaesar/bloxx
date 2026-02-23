@@ -3,11 +3,23 @@
 #include <deque>
 #include <functional>
 #include <iostream>
+#include <robin_hood.h>
 #include <vector>
 
 #include "grid.h"
 
 using namespace std;
+
+// Hash specialization for uint128_simd (must be after including grid.h)
+namespace robin_hood {
+template <> struct hash<uint128_simd> {
+  size_t operator()(const uint128_simd &x) const noexcept {
+    uint64_t lo = (uint64_t)x;
+    uint64_t hi = (uint64_t)(x >> 64);
+    return size_t(lo ^ hi);
+  }
+};
+} // namespace robin_hood
 
 // ── Hot-path lookup tables ─────────────────────────────────────────────────
 // Flat fixed-size arrays eliminate vector pointer indirection in the inner
@@ -186,9 +198,9 @@ struct SearchResult {
 
 // BFS from state 0 stopping as soon as target is reached.
 // Returns a parent-pointer map containing the shortest path to target.
-inline ankerl::unordered_dense::map<StateType, Transition>
+inline robin_hood::unordered_map<StateType, Transition>
 bfsShortestPath(StateType target) {
-  ankerl::unordered_dense::map<StateType, Transition> path;
+  robin_hood::unordered_map<StateType, Transition> path;
   struct Entry {
     StateType state;
     int score;
@@ -395,7 +407,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
 
   // Full BFS within window - explore ALL states reachable by modifying window
   // positions
-  ankerl::unordered_dense::set<StateType> localVisited;
+  robin_hood::unordered_set<StateType> localVisited;
   struct Entry {
     StateType state;
     int score;
@@ -644,11 +656,11 @@ static SearchResult runSlidingWindow() {
 
 static SearchResult runIDDFS() {
   SearchResult result{0, 0, 0, 1};
-  ankerl::unordered_dense::set<StateType> globalSeen;
+  robin_hood::unordered_set<StateType> globalSeen;
   globalSeen.insert(0);
 
   for (int depthLimit = 1;; depthLimit++) {
-    ankerl::unordered_dense::set<StateType> seen;
+    robin_hood::unordered_set<StateType> seen;
     struct Entry {
       StateType state;
       int score;
@@ -729,7 +741,7 @@ int main() {
   buildSymmetries();
 
   SearchResult result{0, 0, 0, 0};
-  ankerl::unordered_dense::map<StateType, Transition> visited;
+  robin_hood::unordered_map<StateType, Transition> visited;
 
   if (SEARCH_MODE == 3) {
     result = runSlidingWindow();
