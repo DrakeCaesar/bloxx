@@ -1,3 +1,4 @@
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <robin_hood.h>
@@ -365,7 +366,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
         if (newType == curType) continue;
         if (!canPlace(present, newType)) continue;
         
-        StateType next = canonical(stateSet(cur, pos, newType));
+        StateType next = stateSet(cur, pos, newType);
         
         // Only track within this window to prevent infinite loops
         if (localVisited.insert(next).second) {
@@ -407,22 +408,50 @@ static SearchResult runSlidingWindow() {
   cout << "For each position: explore all reachable states, keep best, move on\n\n";
   
   // Process each window position sequentially
+  struct WindowStats {
+    int posIdx;
+    int row, col;
+    int kernelSize;
+    long long statesExplored;
+    long long timeMs;
+    bool improved;
+    int scoreAfter;
+  };
+  vector<WindowStats> stats;
+  
   for (int windowIdx = 0; windowIdx < (int)zigzag.size(); windowIdx++) {
     vector<StateType> exploredStates;
+    long long exploredBefore = result.explored;
     
-    cout << "Position " << windowIdx << "/" << zigzag.size();
+    auto [cr, cc] = GRID.positions[zigzag[windowIdx]];
+    
+    auto t0 = chrono::steady_clock::now();
     
     exploreWindow(currentState, windowIdx, exploredStates,
-                 result.bestScore, result.bestState, result.explored, true);
+                 result.bestScore, result.bestState, result.explored, false);
     
-    // If we found a better state, use it; otherwise keep current
-    if (result.bestState != currentState) {
+    auto t1 = chrono::steady_clock::now();
+    auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
+    
+    bool improved = (result.bestState != currentState);
+    if (improved) {
       currentState = result.bestState;
-      cout << "  -> Updated current state (score: " << result.bestScore << ")\n";
-    } else {
-      cout << "  -> No improvement\n";
     }
+    
+    stats.push_back({zigzag[windowIdx], cr, cc, (int)exploredStates.size(),
+                     result.explored - exploredBefore, ms, improved, result.bestScore});
   }
+  
+  // Print summary table
+  cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬─────┬───────┐\n";
+  cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ Imp │ Score │\n";
+  cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼─────┼───────┤\n";
+  for (const auto &s : stats) {
+    printf("│ %3d │ (%d, %d)  │ %12d │ %14lld │ %6lldms │  %s  │ %5d │\n",
+           s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored,
+           s.timeMs, s.improved ? "Y" : "N", s.scoreAfter);
+  }
+  cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴─────┴───────┘\n";
   
   cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0; // Not tracking globally
