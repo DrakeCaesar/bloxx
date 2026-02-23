@@ -507,19 +507,71 @@ static SearchResult runSlidingWindow() {
   
   cout << "Final score after " << roundNum << " round(s): " << result.bestScore << "\n";
   
-  // Compute minimal build path from final state
-  // Place towers in type order (1, 2, 3, 4) - prerequisites are always satisfied
+  // ── Build path reconstruction: reverse deconstruction ───────────────────
+  // Start from the final state and remove towers one at a time.
+  // A tower of type T at pos can be removed if its placement prerequisites
+  // (types 0..T-1 among neighbors) are met by the REMAINING towers.
+  // This ensures that when we reverse the removal order, each placement
+  // is valid. Greedy: remove highest types first (they get placed last).
+  
   StateType finalState = result.bestState;
-  vector<pair<int,int>> buildPath; // (pos, type)
-  for (int targetType = 1; targetType <= 4; targetType++) {
-    for (int pos = 0; pos < g_numPos; pos++) {
-      if (stateGet(finalState, pos) == targetType) {
-        buildPath.push_back({pos, targetType});
+  StateType deconState = finalState;
+  vector<pair<int,int>> removalOrder; // (pos, type) — order towers are removed
+  
+  // Collect all non-empty positions
+  vector<int> remaining;
+  for (int pos = 0; pos < g_numPos; pos++) {
+    if (stateGet(finalState, pos) > 0)
+      remaining.push_back(pos);
+  }
+  
+  while (!remaining.empty()) {
+    bool found = false;
+    
+    // Try to remove a tower whose forward-placement would be valid
+    // given the remaining towers. Prefer removing highest types first.
+    // Sort remaining by type descending for greedy selection.
+    sort(remaining.begin(), remaining.end(), [&](int a, int b) {
+      return stateGet(deconState, a) > stateGet(deconState, b);
+    });
+    
+    for (int idx = 0; idx < (int)remaining.size(); idx++) {
+      int pos = remaining[idx];
+      int type = stateGet(deconState, pos);
+      
+      // Check: if we remove this tower (set to 0), would its forward
+      // placement be valid? i.e. do neighbors (in current state minus
+      // this tower) contain types 0..type-1?
+      StateType testState = stateSet(deconState, pos, 0);
+      uint32_t present = neighborPresent(testState, pos);
+      
+      if (canPlace(present, type)) {
+        // Safe to remove — forward placement will be valid
+        removalOrder.push_back({pos, type});
+        deconState = testState;
+        remaining.erase(remaining.begin() + idx);
+        found = true;
+        break;
       }
+    }
+    
+    if (!found) {
+      // Stuck — force-remove the highest type tower anyway
+      int pos = remaining[0];
+      int type = stateGet(deconState, pos);
+      cout << "WARNING: forced removal of type " << type << " at pos " << pos 
+           << " (prerequisites not met)\n";
+      removalOrder.push_back({pos, type});
+      deconState = stateSet(deconState, pos, 0);
+      remaining.erase(remaining.begin());
     }
   }
   
-  cout << "\n--- Shortest build path (" << buildPath.size() << " steps) ---\n\n";
+  // Reverse removal order = forward build order
+  vector<pair<int,int>> buildPath(removalOrder.rbegin(), removalOrder.rend());
+  
+  // Print the build path with validation
+  cout << "\n--- Build path (" << buildPath.size() << " steps) ---\n\n";
   StateType state = 0;
   int validSteps = 0, invalidSteps = 0;
   cout << "Start:\n";
@@ -529,7 +581,6 @@ static SearchResult runSlidingWindow() {
     int newType = buildPath[i].second;
     int oldType = stateGet(state, pos);
     
-    // Validate: check if placement requirements are met BEFORE placing
     uint32_t present = neighborPresent(state, pos);
     bool valid = canPlace(present, newType);
     if (valid) validSteps++; else invalidSteps++;
@@ -543,8 +594,7 @@ static SearchResult runSlidingWindow() {
          << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET
          << " (" << newType << ")";
     if (!valid) {
-      // Show what's missing
-      cout << "  \033[31m✗ INVALID\033[0m (need mask 0x" << hex << g_requiredMask[newType] 
+      cout << "  \033[31m✗ INVALID\033[0m (need 0x" << hex << g_requiredMask[newType] 
            << ", have 0x" << present << dec << ")";
     } else {
       cout << "  \033[32m✓\033[0m";
@@ -553,17 +603,18 @@ static SearchResult runSlidingWindow() {
     printGrid(state);
   }
   
-  cout << "\nBuild path validation: " << validSteps << " valid, " << invalidSteps << " invalid out of " 
-       << buildPath.size() << " steps";
+  int reachedScore = scoreGrid(state);
+  cout << "\nBuild path: " << buildPath.size() << " steps, "
+       << validSteps << " valid, " << invalidSteps << " invalid";
   if (invalidSteps == 0) {
     cout << " \033[32m— ALL VALID\033[0m";
   } else {
-    cout << " \033[31m— HAS INVALID STEPS (scaffolding needed)\033[0m";
+    cout << " \033[31m— HAS INVALID STEPS\033[0m";
   }
-  cout << "\n";
+  cout << "\nReached score: " << reachedScore << " (target: " << result.bestScore << ")\n";
   
   cout << "\nFinal score: " << result.bestScore << "\n";
-  result.uniqueStates = 0; // Not tracking globally
+  result.uniqueStates = 0;
   return result;
 }
 
