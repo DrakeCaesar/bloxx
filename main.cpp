@@ -453,6 +453,37 @@ static SearchResult runSlidingWindow() {
   }
   cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴─────┴───────┘\n";
   
+  // Compute minimal build path from final state
+  // Place towers in type order (1, 2, 3, 4) - prerequisites are always satisfied
+  StateType finalState = result.bestState;
+  vector<pair<int,int>> buildPath; // (pos, type)
+  for (int targetType = 1; targetType <= 4; targetType++) {
+    for (int pos = 0; pos < g_numPos; pos++) {
+      if (stateGet(finalState, pos) == targetType) {
+        buildPath.push_back({pos, targetType});
+      }
+    }
+  }
+  
+  cout << "\n--- Shortest build path (" << buildPath.size() << " steps) ---\n\n";
+  StateType state = 0;
+  cout << "Start:\n";
+  printGrid(state);
+  for (int i = 0; i < (int)buildPath.size(); i++) {
+    int pos = buildPath[i].first;
+    int newType = buildPath[i].second;
+    int oldType = stateGet(state, pos);
+    state = stateSet(state, pos, newType);
+    
+    auto [r, c] = GRID.positions[pos];
+    cout << "\nStep " << (i + 1) << ": pos " << pos << " (" << r << "," << c << ")  "
+         << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET
+         << " (" << oldType << ") -> "
+         << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET
+         << " (" << newType << ")\n";
+    printGrid(state);
+  }
+  
   cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0; // Not tracking globally
   return result;
@@ -636,12 +667,12 @@ int main() {
   // Path reconstruction only available for BFS
   if (SEARCH_MODE == 0) {
     printBuildPath(result.bestState, visited);
-  } else if (SEARCH_MODE != 3) {
+  } else if (SEARCH_MODE == 3) {
+    // Path already printed by runSlidingWindow
+  } else {
     cout << "\nFinding shortest build path via BFS...\n";
     auto pathMap = bfsShortestPath(result.bestState);
     printBuildPath(result.bestState, pathMap);
-  } else {
-    cout << "\n(Path reconstruction not available for sliding window)\n";
   }
 
   return 0;
