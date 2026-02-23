@@ -1,23 +1,13 @@
+#include <ankerl/unordered_dense.h>
 #include <chrono>
+#include <deque>
 #include <functional>
 #include <iostream>
-#include <robin_hood.h>
 #include <vector>
 
 #include "grid.h"
 
 using namespace std;
-
-// Hash specialization for uint128_simd (must be after including grid.h)
-namespace robin_hood {
-template <> struct hash<uint128_simd> {
-  size_t operator()(const uint128_simd &x) const noexcept {
-    uint64_t lo = (uint64_t)x;
-    uint64_t hi = (uint64_t)(x >> 64);
-    return size_t(lo ^ hi);
-  }
-};
-} // namespace robin_hood
 
 // ── Hot-path lookup tables ─────────────────────────────────────────────────
 // Flat fixed-size arrays eliminate vector pointer indirection in the inner
@@ -196,9 +186,9 @@ struct SearchResult {
 
 // BFS from state 0 stopping as soon as target is reached.
 // Returns a parent-pointer map containing the shortest path to target.
-inline robin_hood::unordered_map<StateType, Transition>
+inline ankerl::unordered_dense::map<StateType, Transition>
 bfsShortestPath(StateType target) {
-  robin_hood::unordered_map<StateType, Transition> path;
+  ankerl::unordered_dense::map<StateType, Transition> path;
   struct Entry {
     StateType state;
     int score;
@@ -239,18 +229,17 @@ bfsShortestPath(StateType target) {
 // current state. The prior type at that position can be any other value,
 // without needing to satisfy its own placement requirements.
 static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
-  robin_hood::unordered_map<StateType, Transition> parent;
-  struct Entry {
-    StateType state;
-  };
-  vector<Entry> q;
-  size_t head = 0;
+  ankerl::unordered_dense::map<StateType, Transition> parent;
+  parent.reserve(1ull << 26); // ~64M elements
+
+  std::deque<StateType> q;
 
   parent[finalState] = {finalState, -1, -1};
-  q.push_back({finalState});
+  q.push_back(finalState);
 
-  while (head < q.size()) {
-    StateType cur = q[head++].state;
+  while (!q.empty()) {
+    StateType cur = q.front();
+    q.pop_front();
     if (cur == 0)
       break;
 
@@ -268,9 +257,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
           continue;
         StateType next = stateSet(cur, pos, prevType);
         if (parent.emplace(next, Transition{cur, (int8_t)pos, (int8_t)curType})
-                .second) {
-          q.push_back({next});
-        }
+                .second)
+          q.push_back(next);
       }
     }
   }
@@ -279,6 +267,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     return {};
 
   // Reconstruct forward build path: start at base state, move toward final.
+  cout << "\nReverse BFS visited " << parent.size() << " states.\n";
   vector<pair<int, int>> steps;
   StateType cur = 0;
   while (parent.at(cur).getPos() != -1) {
@@ -406,7 +395,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
 
   // Full BFS within window - explore ALL states reachable by modifying window
   // positions
-  robin_hood::unordered_set<StateType> localVisited;
+  ankerl::unordered_dense::set<StateType> localVisited;
   struct Entry {
     StateType state;
     int score;
@@ -655,11 +644,11 @@ static SearchResult runSlidingWindow() {
 
 static SearchResult runIDDFS() {
   SearchResult result{0, 0, 0, 1};
-  robin_hood::unordered_set<StateType> globalSeen;
+  ankerl::unordered_dense::set<StateType> globalSeen;
   globalSeen.insert(0);
 
   for (int depthLimit = 1;; depthLimit++) {
-    robin_hood::unordered_set<StateType> seen;
+    ankerl::unordered_dense::set<StateType> seen;
     struct Entry {
       StateType state;
       int score;
@@ -740,7 +729,7 @@ int main() {
   buildSymmetries();
 
   SearchResult result{0, 0, 0, 0};
-  robin_hood::unordered_map<StateType, Transition> visited;
+  ankerl::unordered_dense::map<StateType, Transition> visited;
 
   if (SEARCH_MODE == 3) {
     result = runSlidingWindow();

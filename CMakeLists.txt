@@ -12,13 +12,13 @@ else()
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
 endif()
 
-# Robin-hood hashing library
+# Ankerl unordered_dense library
 include(FetchContent)
-FetchContent_Declare(robin_hood
-  GIT_REPOSITORY https://github.com/martinus/robin-hood-hashing.git
-  GIT_TAG 3.11.5
+FetchContent_Declare(unordered_dense
+  GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
+  GIT_TAG v4.4.0
 )
-FetchContent_MakeAvailable(robin_hood)
+FetchContent_MakeAvailable(unordered_dense)
 
 add_executable(tower_solver main.cpp)
-target_link_libraries(tower_solver PRIVATE robin_hood::robin_hood)
+target_include_directories(tower_solver PRIVATE ${unordered_dense_SOURCE_DIR}/include)

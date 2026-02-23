@@ -60,7 +60,11 @@ const vector<vector<string>> KERNEL_PATTERNS = {
     // 5: L-shape (5 positions)
     {"...", ". ", ". "},
 };
-const vector<string> &WINDOW_KERNEL_PATTERN = KERNEL_PATTERNS[KERNEL_INDEX];
+inline const vector<string> &getWindowKernelPattern() {
+  static const vector<string> pattern = KERNEL_PATTERNS[KERNEL_INDEX];
+  return pattern;
+}
+#define WINDOW_KERNEL_PATTERN getWindowKernelPattern()
 
 // Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
 // 128-bit
