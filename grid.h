@@ -23,6 +23,53 @@ using StateType64 = uint64_t;
 using StateType128 = uint128_simd;
 
 // ANSI color codes
+
+// ══════════════════════════════════════════════════════════════════════════
+// Configuration Constants
+// ══════════════════════════════════════════════════════════════════════════
+
+#define LEVEL 4 // Grid level (1-5), must be #define for preprocessor
+// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 =
+// Sliding Window
+[[maybe_unused]] const int SEARCH_MODE = 3;
+// Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
+// Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
+const int MAX_UNLOCKED_TYPE = 4;
+// Sliding window parameters
+const int MAX_DEPTH = 10; // Maximum BFS depth per window
+const int SCAFFOLD_DEPTH =
+    10; // Maximum BFS depth for scaffold search during path reconstruction
+
+const int KERNEL_INDEX = 2; // Select which kernel to use
+
+// Kernel patterns: '.' = include in window, ' ' = exclude
+// Pattern is centered on the window position
+// Multiple kernels can be defined; select one with KERNEL_INDEX
+
+const vector<vector<string>> KERNEL_PATTERNS = {
+    // 0: Cross shape (5 positions)
+    {" . ", "...", " . "},
+    // 1: 3x3 square (9 positions)
+    {"...", "...", "..."},
+    // 2: Diamond / plus shape (13 positions)
+    {"  .  ", " ... ", ".....", " ... ", "  .  "},
+    // 3: 5x5 square (25 positions)
+    {".....", ".....", ".....", ".....", "....."},
+    // 4: Plus shape (9 positions)
+    {"  .  ", "  .  ", ".....", "  .  ", "  .  "},
+    // 5: L-shape (5 positions)
+    {"...", ". ", ". "},
+};
+const vector<string> &WINDOW_KERNEL_PATTERN = KERNEL_PATTERNS[KERNEL_INDEX];
+
+// Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
+// 128-bit
+#if LEVEL <= 3
+using StateType = StateType64;
+#else
+using StateType = StateType128;
+#endif
+
 const string COLORS[] = {
     "\033[44m", // Blue background   - type 0
     "\033[41m", // Red background    - type 1
@@ -95,50 +142,6 @@ struct GridConfig {
     computeMaxTypes(maxUnlockedType);
   }
 };
-
-// ══════════════════════════════════════════════════════════════════════════
-// Configuration Constants
-// ══════════════════════════════════════════════════════════════════════════
-
-#define LEVEL 4 // Grid level (1-5), must be #define for preprocessor
-// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 =
-// Sliding Window
-[[maybe_unused]] const int SEARCH_MODE = 3;
-// Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
-// Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
-const int MAX_UNLOCKED_TYPE = 4;
-// Sliding window parameters
-const int MAX_DEPTH = 10; // Maximum BFS depth per window
-const int SCAFFOLD_DEPTH =
-    10; // Maximum BFS depth for scaffold search during path reconstruction
-
-// Kernel patterns: '.' = include in window, ' ' = exclude
-// Pattern is centered on the window position
-// Multiple kernels can be defined; select one with KERNEL_INDEX
-const vector<vector<string>> KERNEL_PATTERNS = {
-    // 0: Cross shape (5 positions)
-    {" . ", "...", " . "},
-    // 1: 3x3 square (9 positions)
-    {"...", "...", "..."},
-    // 2: Diamond / plus shape (13 positions)
-    {"  .  ", " ... ", ".....", " ... ", "  .  "},
-    // 3: 5x5 square (25 positions)
-    {".....", ".....", ".....", ".....", "....."},
-    // 4: Plus shape (9 positions)
-    {"  .  ", "  .  ", ".....", "  .  ", "  .  "},
-    // 5: L-shape (5 positions)
-    {"...", ". ", ". "},
-};
-const int KERNEL_INDEX = 2; // Select which kernel to use
-const vector<string> &WINDOW_KERNEL_PATTERN = KERNEL_PATTERNS[KERNEL_INDEX];
-
-// Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
-// 128-bit
-#if LEVEL <= 3
-using StateType = StateType64;
-#else
-using StateType = StateType128;
-#endif
 
 // ══════════════════════════════════════════════════════════════════════════
 // Grid Creation
