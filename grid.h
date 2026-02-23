@@ -34,6 +34,15 @@ const string COLOR_NAMES[] = {"Blue", "Red", "Green", "Yellow", "White"};
 const string RESET = "\033[0m";
 const string BLACK_TEXT = "\033[30m"; // Black text for number
 
+// ANSI foreground colors for half-block separators (3x codes)
+const string FG_COLORS[] = {
+    "\033[34m", // Blue foreground   - type 0
+    "\033[31m", // Red foreground    - type 1
+    "\033[32m", // Green foreground  - type 2
+    "\033[33m", // Yellow foreground - type 3
+    "\033[37m"  // White foreground  - type 4
+};
+
 // ══════════════════════════════════════════════════════════════════════════
 // Grid Configuration
 // ══════════════════════════════════════════════════════════════════════════
@@ -91,15 +100,17 @@ struct GridConfig {
 // Configuration Constants
 // ══════════════════════════════════════════════════════════════════════════
 
-#define LEVEL 5  // Grid level (1-5), must be #define for preprocessor
-// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 = Sliding Window
+#define LEVEL 4 // Grid level (1-5), must be #define for preprocessor
+// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 =
+// Sliding Window
 [[maybe_unused]] const int SEARCH_MODE = 3;
 // Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
 // Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
 const int MAX_UNLOCKED_TYPE = 4;
 // Sliding window parameters
-const int MAX_DEPTH = 10;       // Maximum BFS depth per window
-const int SCAFFOLD_DEPTH = 10;   // Maximum BFS depth for scaffold search during path reconstruction
+const int MAX_DEPTH = 10; // Maximum BFS depth per window
+const int SCAFFOLD_DEPTH =
+    10; // Maximum BFS depth for scaffold search during path reconstruction
 
 // Kernel patterns: '.' = include in window, ' ' = exclude
 // Pattern is centered on the window position
@@ -118,7 +129,7 @@ const vector<vector<string>> KERNEL_PATTERNS = {
     // 5: L-shape (5 positions)
     {"...", ". ", ". "},
 };
-const int KERNEL_INDEX = 2;  // Select which kernel to use
+const int KERNEL_INDEX = 2; // Select which kernel to use
 const vector<string> &WINDOW_KERNEL_PATTERN = KERNEL_PATTERNS[KERNEL_INDEX];
 
 // Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
@@ -207,23 +218,59 @@ extern int stateGet(StateType s, int pos);
 extern StateType stateSet(StateType s, int pos, int val);
 
 inline void printGrid(StateType s) {
-  auto cell = [&](int r, int c) -> string {
-    pair<int, int> coord = {r, c};
-    if (!GRID.coordToIdx.count(coord))
-      return " ";
-    int idx = GRID.coordToIdx[coord];
-    int t = stateGet(s, idx);
-    return COLORS[t] + BLACK_TEXT + to_string(t) + RESET;
-  };
-
   for (int r = 0; r < GRID.rows; r++) {
-    cout << "  ";
-    for (int c = 0; c < GRID.cols; c++) {
-      cout << cell(r, c);
-      if (c < GRID.cols - 1)
-        cout << " ";
+    // Left padding - only if first cell exists
+    pair<int, int> firstCoord = {r, 0};
+    if (GRID.coordToIdx.count(firstCoord)) {
+      int firstT = stateGet(s, GRID.coordToIdx[firstCoord]);
+      cout << FG_COLORS[firstT] << "▐" << RESET;
+    } else {
+      cout << " "; // Space if no cell at line start
     }
-    cout << "\n";
+
+    for (int c = 0; c < GRID.cols; c++) {
+      pair<int, int> coord = {r, c};
+      if (GRID.coordToIdx.count(coord)) {
+        int t = stateGet(s, GRID.coordToIdx[coord]);
+        cout << COLORS[t] << BLACK_TEXT << t << RESET;
+      } else {
+        cout << " "; // Empty space for non-grid positions
+      }
+
+      // Separator between cells
+      if (c < GRID.cols - 1) {
+        pair<int, int> nextCoord = {r, c + 1};
+        bool currExists = GRID.coordToIdx.count(coord);
+        bool nextExists = GRID.coordToIdx.count(nextCoord);
+
+        if (currExists && nextExists) {
+          // Both cells exist: colored separator
+          int t = stateGet(s, GRID.coordToIdx[coord]);
+          int nextT = stateGet(s, GRID.coordToIdx[nextCoord]);
+          cout << FG_COLORS[nextT] << COLORS[t] << "▐" << RESET;
+        } else if (currExists && !nextExists) {
+          // Cell then gap: right half block with current cell color
+          int t = stateGet(s, GRID.coordToIdx[coord]);
+          cout << FG_COLORS[t] << "▌" << RESET;
+        } else if (!currExists && nextExists) {
+          // Gap then cell: left half block with next cell color
+          int nextT = stateGet(s, GRID.coordToIdx[nextCoord]);
+          cout << FG_COLORS[nextT] << "▐" << RESET;
+        } else {
+          // Neither exists: space
+          cout << " ";
+        }
+      }
+    }
+
+    // Right padding - only if last cell exists
+    pair<int, int> lastCoord = {r, GRID.cols - 1};
+    if (GRID.coordToIdx.count(lastCoord)) {
+      int lastT = stateGet(s, GRID.coordToIdx[lastCoord]);
+      cout << FG_COLORS[lastT] << "▌" << RESET << "\n";
+    } else {
+      cout << " \n"; // Space if no cell at line end
+    }
   }
 }
 
