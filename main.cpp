@@ -521,12 +521,19 @@ static SearchResult runSlidingWindow() {
   
   cout << "\n--- Shortest build path (" << buildPath.size() << " steps) ---\n\n";
   StateType state = 0;
+  int validSteps = 0, invalidSteps = 0;
   cout << "Start:\n";
   printGrid(state);
   for (int i = 0; i < (int)buildPath.size(); i++) {
     int pos = buildPath[i].first;
     int newType = buildPath[i].second;
     int oldType = stateGet(state, pos);
+    
+    // Validate: check if placement requirements are met BEFORE placing
+    uint32_t present = neighborPresent(state, pos);
+    bool valid = canPlace(present, newType);
+    if (valid) validSteps++; else invalidSteps++;
+    
     state = stateSet(state, pos, newType);
     
     auto [r, c] = GRID.positions[pos];
@@ -534,9 +541,26 @@ static SearchResult runSlidingWindow() {
          << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET
          << " (" << oldType << ") -> "
          << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET
-         << " (" << newType << ")\n";
+         << " (" << newType << ")";
+    if (!valid) {
+      // Show what's missing
+      cout << "  \033[31m✗ INVALID\033[0m (need mask 0x" << hex << g_requiredMask[newType] 
+           << ", have 0x" << present << dec << ")";
+    } else {
+      cout << "  \033[32m✓\033[0m";
+    }
+    cout << "\n";
     printGrid(state);
   }
+  
+  cout << "\nBuild path validation: " << validSteps << " valid, " << invalidSteps << " invalid out of " 
+       << buildPath.size() << " steps";
+  if (invalidSteps == 0) {
+    cout << " \033[32m— ALL VALID\033[0m";
+  } else {
+    cout << " \033[31m— HAS INVALID STEPS (scaffolding needed)\033[0m";
+  }
+  cout << "\n";
   
   cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0; // Not tracking globally
