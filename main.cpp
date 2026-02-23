@@ -249,30 +249,57 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   parent[finalState] = {finalState, -1, -1};
   q.push_back(finalState);
 
+  size_t depth = 0;
+  double prevMs = 0.0;
   while (!q.empty()) {
-    StateType cur = q.front();
-    q.pop_front();
-    if (cur == 0)
-      break;
+    size_t layerCount = q.size();
+    auto layerStart = chrono::steady_clock::now();
 
-    for (int pos = 0; pos < g_numPos; pos++) {
-      int curType = stateGet(cur, pos);
-      if (curType == 0)
-        continue; // Nothing to remove at this position
+    for (size_t i = 0; i < layerCount; i++) {
+      StateType cur = q.front();
+      q.pop_front();
+      if (cur == 0) {
+        q.clear();
+        break;
+      }
 
-      uint32_t present = neighborPresent(cur, pos);
-      if (!canPlace(present, curType))
-        continue; // This tower could not have been placed here
+      for (int pos = 0; pos < g_numPos; pos++) {
+        int curType = stateGet(cur, pos);
+        if (curType == 0)
+          continue; // Nothing to remove at this position
 
-      for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
-        if (prevType == curType)
-          continue;
-        StateType next = stateSet(cur, pos, prevType);
-        if (parent.emplace(next, Transition{cur, (int8_t)pos, (int8_t)curType})
-                .second)
-          q.push_back(next);
+        uint32_t present = neighborPresent(cur, pos);
+        if (!canPlace(present, curType))
+          continue; // This tower could not have been placed here
+
+        for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
+          if (prevType == curType)
+            continue;
+          StateType next = stateSet(cur, pos, prevType);
+          if (parent.emplace(next,
+                             Transition{cur, (int8_t)pos, (int8_t)curType})
+                  .second)
+            q.push_back(next);
+        }
       }
     }
+
+    auto layerEnd = chrono::steady_clock::now();
+    double layerMs =
+        chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
+            .count();
+    double pctDelta = prevMs > 0.0 ? ((layerMs - prevMs) / prevMs) * 100.0
+                                   : 0.0;
+    cout << "Reverse BFS layer " << depth << ": " << layerCount
+         << " states, " << layerMs << " ms";
+    if (depth > 0) {
+      cout << " (" << (pctDelta >= 0.0 ? "+" : "") << pctDelta
+           << "% vs prev)";
+    }
+    cout << "\n";
+
+    prevMs = layerMs;
+    depth++;
   }
 
   if (!parent.count(0))
