@@ -234,6 +234,61 @@ bfsShortestPath(StateType target) {
   return path;
 }
 
+// Reverse BFS from a final state to base (all zeros).
+// A tower can be removed if its placement requirements are met in the
+// current state. The prior type at that position can be any other value,
+// without needing to satisfy its own placement requirements.
+static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
+  robin_hood::unordered_map<StateType, Transition> parent;
+  struct Entry {
+    StateType state;
+  };
+  vector<Entry> q;
+  size_t head = 0;
+
+  parent[finalState] = {finalState, -1, -1};
+  q.push_back({finalState});
+
+  while (head < q.size()) {
+    StateType cur = q[head++].state;
+    if (cur == 0)
+      break;
+
+    for (int pos = 0; pos < g_numPos; pos++) {
+      int curType = stateGet(cur, pos);
+      if (curType == 0)
+        continue; // Nothing to remove at this position
+
+      uint32_t present = neighborPresent(cur, pos);
+      if (!canPlace(present, curType))
+        continue; // This tower could not have been placed here
+
+      for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
+        if (prevType == curType)
+          continue;
+        StateType next = stateSet(cur, pos, prevType);
+        if (parent.emplace(next, Transition{cur, (int8_t)pos, (int8_t)curType})
+                .second) {
+          q.push_back({next});
+        }
+      }
+    }
+  }
+
+  if (!parent.count(0))
+    return {};
+
+  // Reconstruct forward build path: start at base state, move toward final.
+  vector<pair<int, int>> steps;
+  StateType cur = 0;
+  while (parent.at(cur).getPos() != -1) {
+    const auto &tr = parent.at(cur);
+    steps.push_back({tr.getPos(), tr.getType()});
+    cur = tr.parent;
+  }
+  return steps;
+}
+
 // ── Sliding Window Optimization ────────────────────────────────────────────
 // Processes grid using 3x3 windows with stride=1 along a JPEG-like zigzag path
 // Each window respects constraints from the entire grid (in+out of window)
@@ -243,27 +298,38 @@ bfsShortestPath(StateType target) {
 static vector<int> buildZigzagPath(int corner = 0) {
   int R = GRID.rows, C = GRID.cols;
   vector<vector<pair<int, int>>> diagonals;
-  
+
   // Group by diagonal - direction depends on corner
   for (int r = 0; r < R; r++) {
     for (int c = 0; c < C; c++) {
       pair<int, int> coord = {r, c};
-      if (!GRID.coordToIdx.count(coord)) continue;
-      
+      if (!GRID.coordToIdx.count(coord))
+        continue;
+
       int diag;
       switch (corner) {
-        case 0: diag = r + c; break;                       // top-left
-        case 1: diag = r + (C - 1 - c); break;             // top-right
-        case 2: diag = (R - 1 - r) + c; break;             // bottom-left
-        case 3: diag = (R - 1 - r) + (C - 1 - c); break;  // bottom-right
-        default: diag = r + c; break;
+      case 0:
+        diag = r + c;
+        break; // top-left
+      case 1:
+        diag = r + (C - 1 - c);
+        break; // top-right
+      case 2:
+        diag = (R - 1 - r) + c;
+        break; // bottom-left
+      case 3:
+        diag = (R - 1 - r) + (C - 1 - c);
+        break; // bottom-right
+      default:
+        diag = r + c;
+        break;
       }
       if (diag >= (int)diagonals.size())
         diagonals.resize(diag + 1);
       diagonals[diag].push_back({r, c});
     }
   }
-  
+
   vector<int> path;
   for (int d = 0; d < (int)diagonals.size(); d++) {
     auto &diag = diagonals[d];
@@ -289,19 +355,20 @@ static int scoreGrid(StateType state) {
 // BFS within a window: exhaustively explore ALL reachable states
 // by modifying only positions within the window
 static void exploreWindow(StateType startState, int windowCenterIdx,
-                             vector<StateType> &newStates,
-                             int &bestScore, StateType &bestState,
-                             long long &explored, bool verbose = false) {
+                          vector<StateType> &newStates, int &bestScore,
+                          StateType &bestState, long long &explored,
+                          bool verbose = false) {
   // Get kernel pattern window around position
   auto [cr, cc] = GRID.positions[windowCenterIdx];
-  
+
   if (verbose) {
-    cout << "  Window at position " << windowCenterIdx << " (row " << cr << ", col " << cc << ")";
+    cout << "  Window at position " << windowCenterIdx << " (row " << cr
+         << ", col " << cc << ")";
   }
-  
+
   size_t statesBeforeWindow = newStates.size();
   long long movesBefore = explored;
-  
+
   // Parse kernel pattern to get offsets
   int patternRows = (int)WINDOW_KERNEL_PATTERN.size();
   int patternCols = 0;
@@ -310,7 +377,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
   }
   int centerR = patternRows / 2;
   int centerC = patternCols / 2;
-  
+
   vector<int> windowPositions;
   for (int pr = 0; pr < patternRows; pr++) {
     for (int pc = 0; pc < (int)WINDOW_KERNEL_PATTERN[pr].size(); pc++) {
@@ -324,19 +391,21 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
       }
     }
   }
-  
+
   // Debug: show kernel details
   if (verbose) {
     cout << " [kernel size=" << windowPositions.size() << ", positions={";
     for (size_t i = 0; i < windowPositions.size(); i++) {
       int pos = windowPositions[i];
       cout << pos << "(" << g_maxType[pos] << ")";
-      if (i < windowPositions.size() - 1) cout << ",";
+      if (i < windowPositions.size() - 1)
+        cout << ",";
     }
     cout << "}]";
   }
-  
-  // Full BFS within window - explore ALL states reachable by modifying window positions
+
+  // Full BFS within window - explore ALL states reachable by modifying window
+  // positions
   robin_hood::unordered_set<StateType> localVisited;
   struct Entry {
     StateType state;
@@ -344,38 +413,42 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
     int depth;
   };
   vector<Entry> q;
-  
+
   localVisited.insert(startState);
   q.push_back({startState, scoreGrid(startState), 0});
   size_t head = 0;
-  
+
   while (head < q.size()) {
     auto [cur, curScore, depth] = q[head++];
     explored++;
-    
+
     // Stop expanding this branch if we've reached max depth
-    if (depth >= MAX_DEPTH) continue;
-    
+    if (depth >= MAX_DEPTH)
+      continue;
+
     if (curScore > bestScore) {
       bestScore = curScore;
       bestState = cur;
       cout << "New best: " << bestScore << "\n";
       printGrid(bestState);
     }
-    
+
     // Try modifying each position in the window
     for (int pos : windowPositions) {
-      if (pos >= g_numPos) continue;
+      if (pos >= g_numPos)
+        continue;
       int curType = stateGet(cur, pos);
-      
+
       // Try all valid types for this position
       uint32_t present = neighborPresent(cur, pos);
       for (int newType = 0; newType <= g_maxType[pos]; newType++) {
-        if (newType == curType) continue;
-        if (!canPlace(present, newType)) continue;
-        
+        if (newType == curType)
+          continue;
+        if (!canPlace(present, newType))
+          continue;
+
         StateType next = stateSet(cur, pos, newType);
-        
+
         // Only track within this window to prevent infinite loops
         if (localVisited.insert(next).second) {
           int nextScore = curScore + (newType - curType);
@@ -386,14 +459,14 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
     }
   }
   // localVisited is destroyed here - no global state persists
-  
+
   size_t statesGenerated = newStates.size() - statesBeforeWindow;
   size_t windowStatesExplored = localVisited.size();
   long long movesTried = explored - movesBefore;
-  
+
   if (verbose && statesGenerated > 0) {
-    cout << " -> explored " << windowStatesExplored << " states (" 
-         << movesTried << " moves), generated " << statesGenerated << " new\n";
+    cout << " -> explored " << windowStatesExplored << " states (" << movesTried
+         << " moves), generated " << statesGenerated << " new\n";
   } else if (verbose) {
     cout << " -> explored " << windowStatesExplored << " states, no new\n";
   }
@@ -404,15 +477,17 @@ static SearchResult runSlidingWindow() {
   result.bestState = 0;
   result.bestScore = 0;
   result.explored = 0;
-  
+
   cout << "Sliding window - sequential greedy approach:\n";
   for (const auto &row : WINDOW_KERNEL_PATTERN) {
     cout << "  " << row << "\n";
   }
-  cout << "Chained 4-corner passes (A->B->C->D), repeating until no improvement\n\n";
-  
-  const char* cornerNames[] = {"top-left", "top-right", "bottom-left", "bottom-right"};
-  
+  cout << "Chained 4-corner passes (A->B->C->D), repeating until no "
+          "improvement\n\n";
+
+  const char *cornerNames[] = {"top-left", "top-right", "bottom-left",
+                               "bottom-right"};
+
   struct WindowStats {
     int posIdx;
     int row, col;
@@ -422,239 +497,114 @@ static SearchResult runSlidingWindow() {
     bool improved;
     int scoreAfter;
   };
-  
+
   StateType currentState = 0;
   int currentScore = 0;
   int roundNum = 0;
-  
+
   while (true) {
     roundNum++;
     int scoreAtRoundStart = currentScore;
-    
-    cout << "============ Round " << roundNum << " (starting score: " << currentScore << ") ============\n\n";
-    
+
+    cout << "============ Round " << roundNum
+         << " (starting score: " << currentScore << ") ============\n\n";
+
     for (int corner = 0; corner < 4; corner++) {
       vector<int> zigzag = buildZigzagPath(corner);
-      
+
       int bestScore = currentScore;
       StateType bestState = currentState;
       long long explored = 0;
-      
-      cout << "=== Pass " << (char)('A' + corner) << ": " << cornerNames[corner] 
+
+      cout << "=== Pass " << (char)('A' + corner) << ": " << cornerNames[corner]
            << " (path length: " << zigzag.size() << ") ===\n";
-      
+
       auto passStart = chrono::steady_clock::now();
-      
+
       vector<WindowStats> stats;
-      
+
       for (int windowIdx = 0; windowIdx < (int)zigzag.size(); windowIdx++) {
         vector<StateType> exploredStates;
         long long exploredBefore = explored;
-        
+
         int posIdx = zigzag[windowIdx];
         auto [cr, cc] = GRID.positions[posIdx];
-        
+
         auto t0 = chrono::steady_clock::now();
-        
-        exploreWindow(currentState, posIdx, exploredStates,
-                     bestScore, bestState, explored, false);
-        
+
+        exploreWindow(currentState, posIdx, exploredStates, bestScore,
+                      bestState, explored, false);
+
         auto t1 = chrono::steady_clock::now();
         auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
-        
+
         bool improved = (bestState != currentState);
         if (improved) {
           currentState = bestState;
         }
-        
+
         stats.push_back({posIdx, cr, cc, (int)exploredStates.size(),
                          explored - exploredBefore, ms, improved, bestScore});
       }
-      
+
       currentScore = bestScore;
-      
+
       auto passEnd = chrono::steady_clock::now();
-      auto passMs = chrono::duration_cast<chrono::milliseconds>(passEnd - passStart).count();
-      
+      auto passMs =
+          chrono::duration_cast<chrono::milliseconds>(passEnd - passStart)
+              .count();
+
       // Print summary table
-      cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬─────┬───────┐\n";
-      cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ Imp │ Score │\n";
-      cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼─────┼───────┤\n";
+      cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬──"
+              "───┬───────┐\n";
+      cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ "
+              "Imp │ Score │\n";
+      cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼────"
+              "─┼───────┤\n";
       for (const auto &s : stats) {
         printf("│ %3d │ (%d, %d)  │ %12d │ %14lld │ %6lldms │  %s  │ %5d │\n",
-               s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored,
-               s.timeMs, s.improved ? "Y" : "N", s.scoreAfter);
+               s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored, s.timeMs,
+               s.improved ? "Y" : "N", s.scoreAfter);
       }
-      cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴─────┴───────┘\n";
-      cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner] << "): score " << currentScore 
-           << " (" << passMs << "ms, " << explored << " states)\n\n";
-      
+      cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴────"
+              "─┴───────┘\n";
+      cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner]
+           << "): score " << currentScore << " (" << passMs << "ms, "
+           << explored << " states)\n\n";
+
       result.explored += explored;
     }
-    
-    cout << "Round " << roundNum << " complete: score " << scoreAtRoundStart << " -> " << currentScore << "\n";
-    
+
+    cout << "Round " << roundNum << " complete: score " << scoreAtRoundStart
+         << " -> " << currentScore << "\n";
+
     if (currentScore <= scoreAtRoundStart) {
       cout << "No improvement in round " << roundNum << ", stopping.\n\n";
       break;
     } else {
-      cout << "Improved by " << (currentScore - scoreAtRoundStart) << ", starting another round.\n\n";
+      cout << "Improved by " << (currentScore - scoreAtRoundStart)
+           << ", starting another round.\n\n";
     }
   }
-  
+
   result.bestScore = currentScore;
   result.bestState = currentState;
-  
-  cout << "Final score after " << roundNum << " round(s): " << result.bestScore << "\n";
-  
-  // ── Build path reconstruction: reverse deconstruction ───────────────────
-  // Start from the final state and remove towers one at a time.
-  // A tower of type T at pos can be removed if its placement prerequisites
-  // (types 0..T-1 among neighbors) are met by the REMAINING towers.
-  // This ensures that when we reverse the removal order, each placement
-  // is valid. Greedy: remove highest types first (they get placed last).
-  
+
+  cout << "Final score after " << roundNum << " round(s): " << result.bestScore
+       << "\n";
+
+  // ── Build path reconstruction: reverse BFS ─────────────────────────────
   StateType finalState = result.bestState;
-  StateType deconState = finalState;
-  vector<pair<int,int>> removalOrder; // (pos, type) — order towers are removed
-  
-  // Collect all non-empty positions
-  vector<int> remaining;
-  for (int pos = 0; pos < g_numPos; pos++) {
-    if (stateGet(finalState, pos) > 0)
-      remaining.push_back(pos);
+  vector<pair<int, int>> buildPath = buildPathFromReverseBfs(finalState);
+  if (buildPath.empty()) {
+    cout << "\nBuild path not found by reverse BFS.\n";
+    cout << "\nFinal score: " << result.bestScore << "\n";
+    result.uniqueStates = 0;
+    return result;
   }
-  
-  while (!remaining.empty()) {
-    bool found = false;
-    
-    // Try to remove a tower whose forward-placement would be valid
-    // given the remaining towers. Prefer removing highest types first.
-    // Sort remaining by type descending for greedy selection.
-    sort(remaining.begin(), remaining.end(), [&](int a, int b) {
-      return stateGet(deconState, a) > stateGet(deconState, b);
-    });
-    
-    for (int idx = 0; idx < (int)remaining.size(); idx++) {
-      int pos = remaining[idx];
-      int type = stateGet(deconState, pos);
-      
-      // Check: if we remove this tower (set to 0), would its forward
-      // placement be valid? i.e. do neighbors (in current state minus
-      // this tower) contain types 0..type-1?
-      StateType testState = stateSet(deconState, pos, 0);
-      uint32_t present = neighborPresent(testState, pos);
-      
-      if (canPlace(present, type)) {
-        // Safe to remove — forward placement will be valid
-        removalOrder.push_back({pos, type});
-        deconState = testState;
-        remaining.erase(remaining.begin() + idx);
-        found = true;
-        break;
-      }
-    }
-    
-    if (!found) {
-      // Stuck — force-remove the highest type tower anyway
-      int pos = remaining[0];
-      int type = stateGet(deconState, pos);
-      cout << "WARNING: forced removal of type " << type << " at pos " << pos 
-           << " (prerequisites not met)\n";
-      removalOrder.push_back({pos, type});
-      deconState = stateSet(deconState, pos, 0);
-      remaining.erase(remaining.begin());
-    }
-  }
-  
-  // Reverse removal order = forward build order (base plan)
-  vector<pair<int,int>> basePlan(removalOrder.rbegin(), removalOrder.rend());
-  
-  // ── Fill gaps with BFS: when a step is invalid, search for scaffolding ──
-  // For each invalid step, BFS from current state to find a short sequence
-  // of moves that makes the target placement valid. Then place the target.
-  
-  const int SCAFFOLD_MAX_DEPTH = SCAFFOLD_DEPTH;
-  
-  auto bfsFindScaffold = [&](StateType fromState, int targetPos, int targetType)
-      -> vector<pair<int,int>> {
-    // BFS to find shortest move sequence that makes canPlace(targetType @ targetPos) true
-    uint32_t present = neighborPresent(fromState, targetPos);
-    if (canPlace(present, targetType)) return {}; // already valid
-    
-    robin_hood::unordered_map<StateType, pair<StateType, pair<int,int>>> parent;
-    struct Entry { StateType state; int depth; };
-    vector<Entry> q;
-    size_t head = 0;
-    
-    parent[fromState] = {fromState, {-1, -1}};
-    q.push_back({fromState, 0});
-    
-    while (head < q.size()) {
-      auto [cur, depth] = q[head++];
-      if (depth >= SCAFFOLD_MAX_DEPTH) continue;
-      
-      // Try moves on neighbors of targetPos (to provide missing types)
-      const auto &neighbors = GRID.neighbors[targetPos];
-      for (int npos : neighbors) {
-        int curType = stateGet(cur, npos);
-        for (int newType = 0; newType <= g_maxType[npos]; newType++) {
-          if (newType == curType) continue;
-          uint32_t np = neighborPresent(cur, npos);
-          if (!canPlace(np, newType)) continue;
-          
-          StateType next = stateSet(cur, npos, newType);
-          if (parent.count(next)) continue;
-          parent[next] = {cur, {npos, newType}};
-          
-          // Check if target is now placeable
-          uint32_t nextPresent = neighborPresent(next, targetPos);
-          if (canPlace(nextPresent, targetType)) {
-            // Found it — reconstruct
-            vector<pair<int,int>> moves;
-            StateType s = next;
-            while (s != fromState) {
-              auto &p = parent[s];
-              moves.push_back(p.second);
-              s = p.first;
-            }
-            reverse(moves.begin(), moves.end());
-            return moves;
-          }
-          
-          q.push_back({next, depth + 1});
-        }
-      }
-    }
-    return {}; // failed
-  };
-  
-  // Build the final path, inserting scaffolding as needed
-  vector<pair<int,int>> buildPath;
+
+  cout << "\n--- Build path (" << buildPath.size() << " steps) ---\n\n";
   StateType state = 0;
-  int scaffoldCount = 0;
-  
-  for (auto &[pos, type] : basePlan) {
-    uint32_t present = neighborPresent(state, pos);
-    if (!canPlace(present, type)) {
-      // Need scaffolding — BFS for it
-      auto scaffold = bfsFindScaffold(state, pos, type);
-      if (!scaffold.empty()) {
-        for (auto &m : scaffold) {
-          buildPath.push_back(m);
-          state = stateSet(state, m.first, m.second);
-          scaffoldCount++;
-        }
-      }
-    }
-    buildPath.push_back({pos, type});
-    state = stateSet(state, pos, type);
-  }
-  
-  // Print the build path with validation
-  cout << "\n--- Build path (" << buildPath.size() << " steps, " 
-       << scaffoldCount << " scaffolding) ---\n\n";
-  state = 0;
   int validSteps = 0, invalidSteps = 0;
   cout << "Start:\n";
   printGrid(state);
@@ -662,44 +612,42 @@ static SearchResult runSlidingWindow() {
     int pos = buildPath[i].first;
     int newType = buildPath[i].second;
     int oldType = stateGet(state, pos);
-    
+
     uint32_t present = neighborPresent(state, pos);
     bool valid = canPlace(present, newType);
-    if (valid) validSteps++; else invalidSteps++;
-    
-    bool isScaffold = (stateGet(finalState, pos) != newType);
-    
+    if (valid)
+      validSteps++;
+    else
+      invalidSteps++;
+
     state = stateSet(state, pos, newType);
-    
+
     auto [r, c] = GRID.positions[pos];
-    cout << "\nStep " << (i + 1) << ": pos " << pos << " (" << r << "," << c << ")  "
-         << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET
-         << " (" << oldType << ") -> "
-         << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET
-         << " (" << newType << ")";
+    cout << "\nStep " << (i + 1) << ": pos " << pos << " (" << r << "," << c
+         << ")  " << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType]
+         << RESET << " (" << oldType << ") -> " << COLORS[newType] << BLACK_TEXT
+         << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
     if (!valid) {
-      cout << "  \033[31m✗ INVALID\033[0m (need 0x" << hex << g_requiredMask[newType] 
-           << ", have 0x" << present << dec << ")";
+      cout << "  \033[31m✗ INVALID\033[0m (need 0x" << hex
+           << g_requiredMask[newType] << ", have 0x" << present << dec << ")";
     } else {
       cout << "  \033[32m✓\033[0m";
-    }
-    if (isScaffold) {
-      cout << "  \033[33m[scaffold]\033[0m";
     }
     cout << "\n";
     printGrid(state);
   }
-  
+
   int reachedScore = scoreGrid(state);
-  cout << "\nBuild path: " << buildPath.size() << " steps, "
-       << validSteps << " valid, " << invalidSteps << " invalid";
+  cout << "\nBuild path: " << buildPath.size() << " steps, " << validSteps
+       << " valid, " << invalidSteps << " invalid";
   if (invalidSteps == 0) {
     cout << " \033[32m— ALL VALID\033[0m";
   } else {
     cout << " \033[31m— HAS INVALID STEPS\033[0m";
   }
-  cout << "\nReached score: " << reachedScore << " (target: " << result.bestScore << ")\n";
-  
+  cout << "\nReached score: " << reachedScore
+       << " (target: " << result.bestScore << ")\n";
+
   cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0;
   return result;

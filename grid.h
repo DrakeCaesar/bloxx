@@ -53,7 +53,7 @@ const vector<vector<string>> KERNEL_PATTERNS = {
     {"...", "...", "..."},
     // 2: Diamond / plus shape (13 positions)
     {"  .  ", " ... ", ".....", " ... ", "  .  "},
-    // 3: 5x5 square (25 positions)
+    // 3: 5x5 square (25 positiogitns)
     {".....", ".....", ".....", ".....", "....."},
     // 4: Plus shape (9 positions)
     {"  .  ", "  .  ", ".....", "  .  ", "  .  "},
