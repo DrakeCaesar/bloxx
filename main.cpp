@@ -233,6 +233,282 @@ bfsShortestPath(StateType target) {
   return path;
 }
 
+// ── Sliding Window Optimization ────────────────────────────────────────────
+// Processes grid using 3x3 windows with stride=1 along a JPEG-like zigzag path
+// Each window respects constraints from the entire grid (in+out of window)
+
+static vector<int> buildZigzagPath() {
+  // Build diagonal/zigzag path through grid positions
+  // Groups positions by diagonal, then alternates direction per diagonal
+  int R = GRID.rows, C = GRID.cols;
+  vector<vector<pair<int, int>>> diagonals;
+  
+  // Group by diagonal (r + c)
+  for (int r = 0; r < R; r++) {
+    for (int c = 0; c < C; c++) {
+      pair<int, int> coord = {r, c};
+      if (!GRID.coordToIdx.count(coord)) continue;
+      int diag = r + c;
+      if (diag >= (int)diagonals.size())
+        diagonals.resize(diag + 1);
+      diagonals[diag].push_back({r, c});
+    }
+  }
+  
+  vector<int> path;
+  for (int d = 0; d < (int)diagonals.size(); d++) {
+    auto &diag = diagonals[d];
+    // Alternate direction for each diagonal (zigzag effect)
+    if (d % 2 == 1)
+      reverse(diag.begin(), diag.end());
+    for (auto [r, c] : diag) {
+      path.push_back(GRID.coordToIdx[{r, c}]);
+    }
+  }
+  return path;
+}
+
+static int scoreGrid(StateType state) {
+  int score = 0;
+  for (int i = 0; i < g_numPos; i++) {
+    int type = stateGet(state, i);
+    score += type;
+  }
+  return score;
+}
+
+// BFS within a window: exhaustively explore ALL reachable states
+// by modifying only positions within the window
+static void exploreWindow(StateType startState, int windowCenterIdx,
+                             vector<StateType> &newStates,
+                             int &bestScore, StateType &bestState,
+                             long long &explored, bool verbose = false) {
+  // Get kernel pattern window around position
+  auto [cr, cc] = GRID.positions[windowCenterIdx];
+  
+  if (verbose) {
+    cout << "  Window at position " << windowCenterIdx << " (row " << cr << ", col " << cc << ")";
+  }
+  
+  size_t statesBeforeWindow = newStates.size();
+  long long movesBefore = explored;
+  
+  // Parse kernel pattern to get offsets
+  int patternRows = (int)WINDOW_KERNEL_PATTERN.size();
+  int patternCols = 0;
+  for (const auto &row : WINDOW_KERNEL_PATTERN) {
+    patternCols = max(patternCols, (int)row.size());
+  }
+  int centerR = patternRows / 2;
+  int centerC = patternCols / 2;
+  
+  vector<int> windowPositions;
+  for (int pr = 0; pr < patternRows; pr++) {
+    for (int pc = 0; pc < (int)WINDOW_KERNEL_PATTERN[pr].size(); pc++) {
+      if (WINDOW_KERNEL_PATTERN[pr][pc] == '.') {
+        int dr = pr - centerR;
+        int dc = pc - centerC;
+        auto it = GRID.coordToIdx.find({cr + dr, cc + dc});
+        if (it != GRID.coordToIdx.end()) {
+          windowPositions.push_back(it->second);
+        }
+      }
+    }
+  }
+  
+  // Debug: show kernel details
+  if (verbose) {
+    cout << " [kernel size=" << windowPositions.size() << ", positions={";
+    for (size_t i = 0; i < windowPositions.size(); i++) {
+      int pos = windowPositions[i];
+      cout << pos << "(" << g_maxType[pos] << ")";
+      if (i < windowPositions.size() - 1) cout << ",";
+    }
+    cout << "}]";
+  }
+  
+  // Full BFS within window - explore ALL states reachable by modifying window positions
+  robin_hood::unordered_set<StateType> localVisited;
+  struct Entry {
+    StateType state;
+    int score;
+  };
+  vector<Entry> q;
+  
+  localVisited.insert(startState);
+  q.push_back({startState, scoreGrid(startState)});
+  size_t head = 0;
+  
+  bool limitReached = false;
+  
+  while (head < q.size() && localVisited.size() < (size_t)MAX_STATES_PER_WINDOW) {
+    auto [cur, curScore] = q[head++];
+    explored++;
+    
+    if (curScore > bestScore) {
+      bestScore = curScore;
+      bestState = cur;
+      cout << "New best: " << bestScore << "\n";
+      printGrid(bestState);
+    }
+    
+    // Try modifying each position in the window
+    for (int pos : windowPositions) {
+      if (pos >= g_numPos) continue;
+      int curType = stateGet(cur, pos);
+      
+      // Try all valid types for this position
+      uint32_t present = neighborPresent(cur, pos);
+      for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+        if (newType == curType) continue;
+        if (!canPlace(present, newType)) continue;
+        
+        StateType next = canonical(stateSet(cur, pos, newType));
+        
+        // Only track within this window to prevent infinite loops
+        if (localVisited.insert(next).second) {
+          int nextScore = curScore + (newType - curType);
+          q.push_back({next, nextScore});
+          newStates.push_back(next);
+          
+          // Check limit after each insertion
+          if (localVisited.size() >= (size_t)MAX_STATES_PER_WINDOW) {
+            limitReached = true;
+            break;
+          }
+        }
+      }
+      if (limitReached) break;
+    }
+  }
+  // localVisited is destroyed here - no global state persists
+  
+  size_t statesGenerated = newStates.size() - statesBeforeWindow;
+  size_t windowStatesExplored = localVisited.size();
+  long long movesTried = explored - movesBefore;
+  
+  if (verbose && statesGenerated > 0) {
+    cout << " -> explored " << windowStatesExplored << " states (" 
+         << movesTried << " moves), generated " << statesGenerated << " new";
+    if (limitReached) {
+      cout << " [LIMIT REACHED]";
+    }
+    cout << "\n";
+  } else if (verbose) {
+    cout << " -> explored " << windowStatesExplored << " states, no new\n";
+  }
+}
+
+static SearchResult runSlidingWindow() {
+  SearchResult result{0, 0, 0, 0};
+  vector<int> zigzag = buildZigzagPath();
+  
+  // Track states with their scores for intelligent frontier management
+  struct ScoredState {
+    StateType state;
+    int score;
+  };
+  vector<ScoredState> frontier;
+  robin_hood::unordered_set<StateType> frontierSet; // For deduplication
+  
+  StateType startState = 0;
+  frontier.push_back({startState, 0});
+  frontierSet.insert(startState);
+  
+  result.bestState = startState;
+  result.bestScore = 0;
+  result.explored = 0;
+  
+  cout << "Sliding window with exhaustive BFS per window:\n";
+  for (const auto &row : WINDOW_KERNEL_PATTERN) {
+    cout << "  " << row << "\n";
+  }
+  cout << "Zigzag path length: " << zigzag.size() << "\n";
+  cout << "Each window explores ALL reachable states by modifying kernel positions\n\n";
+  
+  for (int pass = 0; pass < NUM_WINDOW_PASSES && !frontier.empty(); pass++) {
+    cout << "\nPass " << (pass + 1) << ": " << frontier.size() << " states in frontier\n";
+    int bestScoreBeforePass = result.bestScore;
+    vector<StateType> allNewStates;
+    
+    // For each state in frontier, slide window through all positions
+    for (size_t stateIdx = 0; stateIdx < frontier.size(); stateIdx++) {
+      StateType state = frontier[stateIdx].state;
+      
+      if (frontier.size() <= 5) {
+        cout << "\nProcessing state " << (stateIdx + 1) << "/" << frontier.size() << ":\n";
+      }
+      
+      for (int windowIdx = 0; windowIdx < (int)zigzag.size(); windowIdx++) {
+        bool verbose = (frontier.size() <= 5); // Show details for small frontiers
+        
+        exploreWindow(state, windowIdx, allNewStates,
+                     result.bestScore, result.bestState, result.explored, verbose);
+        
+        if (!verbose && windowIdx % 3 == 0) {
+          cout << "." << flush;
+        }
+      }
+      
+      if (frontier.size() > 5 && stateIdx % max(1ul, frontier.size() / 10) == 0) {
+        cout << "\n  Processed " << (stateIdx + 1) << "/" << frontier.size() << " states" << flush;
+      }
+      
+      if (result.explored % 10000 == 0) {
+        cout << "Explored: " << result.explored << " | New states: " << allNewStates.size()
+             << " | Best: " << result.bestScore << "\r" << flush;
+      }
+    }
+    
+    cout << "\nPass complete. Generated " << allNewStates.size() << " total states";
+    
+    // Deduplicate and score all new states
+    robin_hood::unordered_map<StateType, int> stateScores;
+    for (StateType s : allNewStates) {
+      int score = scoreGrid(s);
+      auto it = stateScores.find(s);
+      if (it == stateScores.end() || score > it->second) {
+        stateScores[s] = score;
+      }
+    }
+    
+    // Convert to vector and sort by score
+    vector<ScoredState> scoredStates;
+    scoredStates.reserve(stateScores.size());
+    for (const auto& [state, score] : stateScores) {
+      scoredStates.push_back({state, score});
+    }
+    
+    sort(scoredStates.begin(), scoredStates.end(), 
+         [](const ScoredState& a, const ScoredState& b) {
+           return a.score > b.score; // Descending order
+         });
+    
+    // Keep only top N states for next pass
+    int keepCount = min((int)scoredStates.size(), TOP_STATES_FOR_NEXT_PASS);
+    frontier.clear();
+    frontierSet.clear();
+    
+    for (int i = 0; i < keepCount; i++) {
+      frontier.push_back(scoredStates[i]);
+      frontierSet.insert(scoredStates[i].state);
+    }
+    
+    cout << " (unique: " << stateScores.size() << ")";
+    cout << "\n  Keeping top " << frontier.size() << " states for next pass";
+    cout << " | Best score: " << result.bestScore << "\n";
+    
+    // Early termination: if best didn't improve, next pass would be the same
+    if (result.bestScore == bestScoreBeforePass) {
+      cout << "  No improvement in this pass - stopping early\n";
+      break;
+    }
+  }
+  
+  result.uniqueStates = 0; // Not tracking globally
+  return result;
+}
+
 static SearchResult runIDDFS() {
   SearchResult result{0, 0, 0, 1};
   robin_hood::unordered_set<StateType> globalSeen;
@@ -311,8 +587,11 @@ int main() {
     cout << "\nRunning BFS over all reachable states...\n\n";
   else if (SEARCH_MODE == 1)
     cout << "\nRunning DFS over all reachable states...\n\n";
-  else
+  else if (SEARCH_MODE == 2)
     cout << "\nRunning IDDFS over all reachable states...\n\n";
+  else
+    cout << "\nRunning sliding window optimization (" << NUM_WINDOW_PASSES
+         << " passes)...\n\n";
 
   buildLookupTables();
   buildSymmetries();
@@ -320,7 +599,9 @@ int main() {
   SearchResult result{0, 0, 0, 0};
   robin_hood::unordered_map<StateType, Transition> visited;
 
-  if (SEARCH_MODE == 2) {
+  if (SEARCH_MODE == 3) {
+    result = runSlidingWindow();
+  } else if (SEARCH_MODE == 2) {
     result = runIDDFS();
   } else {
     // BFS/DFS: every state is visited exactly once.
@@ -390,7 +671,9 @@ int main() {
     result.uniqueStates = visited.size();
   }
 
-  if (SEARCH_MODE == 2)
+  if (SEARCH_MODE == 3)
+    cout << "\nSliding window complete.\n";
+  else if (SEARCH_MODE == 2)
     cout << "\nIDDFS complete.\n";
   else if (SEARCH_MODE == 1)
     cout << "\nDFS complete.\n";
@@ -402,12 +685,15 @@ int main() {
   cout << "Optimal layout:\n";
   printGrid(result.bestState);
 
+  // Path reconstruction only available for BFS
   if (SEARCH_MODE == 0) {
     printBuildPath(result.bestState, visited);
-  } else {
+  } else if (SEARCH_MODE != 3) {
     cout << "\nFinding shortest build path via BFS...\n";
     auto pathMap = bfsShortestPath(result.bestState);
     printBuildPath(result.bestState, pathMap);
+  } else {
+    cout << "\n(Path reconstruction not available for sliding window)\n";
   }
 
   return 0;

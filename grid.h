@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <map>
 #include <string>
@@ -90,12 +91,28 @@ struct GridConfig {
 // Configuration Constants
 // ══════════════════════════════════════════════════════════════════════════
 
-const int LEVEL = 1;
-// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS)
-[[maybe_unused]] const int SEARCH_MODE = 0;
+const int LEVEL = 2;
+// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 = Sliding Window
+[[maybe_unused]] const int SEARCH_MODE = 3;
 // Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
 // Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
 const int MAX_UNLOCKED_TYPE = 4;
+// Sliding window parameters
+const int NUM_WINDOW_PASSES = 2;  // Number of passes through the grid
+const int MAX_STATES_PER_WINDOW = 100000;  // Limit BFS exploration per window
+const int TOP_STATES_FOR_NEXT_PASS = 10;  // Keep only top N states for next pass
+
+// Kernel pattern: '.' = include in window, ' ' = exclude
+// Pattern is centered on the window position
+const vector<string> WINDOW_KERNEL_PATTERN = {
+    " . ", "...", " . "
+};
+// Predefined kernel patterns:
+// 3x3 square:     {"...", "...", "..."}
+// 5x5 square:     {".....", ".....", ".....", ".....", "....."}
+// Cross shape:    {" . ", "...", " . "}
+// Plus shape:     {"  .  ", "  .  ", ".....", "  .  ", "  .  "}
+// L-shape:        {"...", ". ", ". "}
 
 // Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
 // 128-bit
