@@ -91,7 +91,7 @@ struct GridConfig {
 // Configuration Constants
 // ══════════════════════════════════════════════════════════════════════════
 
-const int LEVEL = 3;
+#define LEVEL 4  // Grid level (1-5), must be #define for preprocessor
 // 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 = Sliding Window
 [[maybe_unused]] const int SEARCH_MODE = 3;
 // Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
