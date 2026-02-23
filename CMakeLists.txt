@@ -24,7 +24,7 @@ FetchContent_MakeAvailable(robin_hood)
 # Ankerl unordered_dense library
 FetchContent_Declare(unordered_dense
   GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
-  GIT_TAG v4.4.0
+  GIT_TAG v4.8.1
 )
 FetchContent_MakeAvailable(unordered_dense)
 
