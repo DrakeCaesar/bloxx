@@ -357,18 +357,9 @@ static int scoreGrid(StateType state) {
 // by modifying only positions within the window
 static void exploreWindow(StateType startState, int windowCenterIdx,
                           vector<StateType> &newStates, int &bestScore,
-                          StateType &bestState, long long &explored,
-                          bool verbose = false) {
+                          StateType &bestState, long long &explored) {
   // Get kernel pattern window around position
   auto [cr, cc] = GRID.positions[windowCenterIdx];
-
-  if (verbose) {
-    cout << "  Window at position " << windowCenterIdx << " (row " << cr
-         << ", col " << cc << ")";
-  }
-
-  size_t statesBeforeWindow = newStates.size();
-  long long movesBefore = explored;
 
   // Parse kernel pattern to get offsets
   int patternRows = (int)WINDOW_KERNEL_PATTERN.size();
@@ -391,18 +382,6 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
         }
       }
     }
-  }
-
-  // Debug: show kernel details
-  if (verbose) {
-    cout << " [kernel size=" << windowPositions.size() << ", positions={";
-    for (size_t i = 0; i < windowPositions.size(); i++) {
-      int pos = windowPositions[i];
-      cout << pos << "(" << g_maxType[pos] << ")";
-      if (i < windowPositions.size() - 1)
-        cout << ",";
-    }
-    cout << "}]";
   }
 
   // Full BFS within window - explore ALL states reachable by modifying window
@@ -460,17 +439,6 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
     }
   }
   // localVisited is destroyed here - no global state persists
-
-  size_t statesGenerated = newStates.size() - statesBeforeWindow;
-  size_t windowStatesExplored = localVisited.size();
-  long long movesTried = explored - movesBefore;
-
-  if (verbose && statesGenerated > 0) {
-    cout << " -> explored " << windowStatesExplored << " states (" << movesTried
-         << " moves), generated " << statesGenerated << " new\n";
-  } else if (verbose) {
-    cout << " -> explored " << windowStatesExplored << " states, no new\n";
-  }
 }
 
 static SearchResult runSlidingWindow() {
@@ -534,7 +502,7 @@ static SearchResult runSlidingWindow() {
         auto t0 = chrono::steady_clock::now();
 
         exploreWindow(currentState, posIdx, exploredStates, bestScore,
-                      bestState, explored, false);
+                      bestState, explored);
 
         auto t1 = chrono::steady_clock::now();
         auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
