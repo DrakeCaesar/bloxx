@@ -276,8 +276,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
           if (prevType == curType)
             continue;
           StateType next = stateSet(cur, pos, prevType);
-          if (parent.emplace(next,
-                             Transition{cur, (int8_t)pos, (int8_t)curType})
+          if (parent
+                  .emplace(next, Transition{cur, (int8_t)pos, (int8_t)curType})
                   .second)
             q.push_back(next);
         }
@@ -288,13 +288,12 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     double layerMs =
         chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
             .count();
-    double pctDelta = prevMs > 0.0 ? ((layerMs - prevMs) / prevMs) * 100.0
-                                   : 0.0;
-    cout << "Reverse BFS layer " << depth << ": " << layerCount
-         << " states, " << layerMs << " ms";
+    double pctDelta =
+        prevMs > 0.0 ? ((layerMs - prevMs) / prevMs) * 100.0 : 0.0;
+    cout << "Reverse BFS layer " << depth << ": " << layerCount << " states, "
+         << layerMs << " ms";
     if (depth > 0) {
-      cout << " (" << (pctDelta >= 0.0 ? "+" : "") << pctDelta
-           << "% vs prev)";
+      cout << " (" << (pctDelta >= 0.0 ? "+" : "") << pctDelta << "% vs prev)";
     }
     cout << "\n";
 
