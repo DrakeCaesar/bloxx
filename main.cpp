@@ -567,12 +567,94 @@ static SearchResult runSlidingWindow() {
     }
   }
   
-  // Reverse removal order = forward build order
-  vector<pair<int,int>> buildPath(removalOrder.rbegin(), removalOrder.rend());
+  // Reverse removal order = forward build order (base plan)
+  vector<pair<int,int>> basePlan(removalOrder.rbegin(), removalOrder.rend());
+  
+  // ── Fill gaps with BFS: when a step is invalid, search for scaffolding ──
+  // For each invalid step, BFS from current state to find a short sequence
+  // of moves that makes the target placement valid. Then place the target.
+  
+  const int SCAFFOLD_MAX_DEPTH = 5;
+  
+  auto bfsFindScaffold = [&](StateType fromState, int targetPos, int targetType)
+      -> vector<pair<int,int>> {
+    // BFS to find shortest move sequence that makes canPlace(targetType @ targetPos) true
+    uint32_t present = neighborPresent(fromState, targetPos);
+    if (canPlace(present, targetType)) return {}; // already valid
+    
+    robin_hood::unordered_map<StateType, pair<StateType, pair<int,int>>> parent;
+    struct Entry { StateType state; int depth; };
+    vector<Entry> q;
+    size_t head = 0;
+    
+    parent[fromState] = {fromState, {-1, -1}};
+    q.push_back({fromState, 0});
+    
+    while (head < q.size()) {
+      auto [cur, depth] = q[head++];
+      if (depth >= SCAFFOLD_MAX_DEPTH) continue;
+      
+      // Try moves on neighbors of targetPos (to provide missing types)
+      const auto &neighbors = GRID.neighbors[targetPos];
+      for (int npos : neighbors) {
+        int curType = stateGet(cur, npos);
+        for (int newType = 0; newType <= g_maxType[npos]; newType++) {
+          if (newType == curType) continue;
+          uint32_t np = neighborPresent(cur, npos);
+          if (!canPlace(np, newType)) continue;
+          
+          StateType next = stateSet(cur, npos, newType);
+          if (parent.count(next)) continue;
+          parent[next] = {cur, {npos, newType}};
+          
+          // Check if target is now placeable
+          uint32_t nextPresent = neighborPresent(next, targetPos);
+          if (canPlace(nextPresent, targetType)) {
+            // Found it — reconstruct
+            vector<pair<int,int>> moves;
+            StateType s = next;
+            while (s != fromState) {
+              auto &p = parent[s];
+              moves.push_back(p.second);
+              s = p.first;
+            }
+            reverse(moves.begin(), moves.end());
+            return moves;
+          }
+          
+          q.push_back({next, depth + 1});
+        }
+      }
+    }
+    return {}; // failed
+  };
+  
+  // Build the final path, inserting scaffolding as needed
+  vector<pair<int,int>> buildPath;
+  StateType state = 0;
+  int scaffoldCount = 0;
+  
+  for (auto &[pos, type] : basePlan) {
+    uint32_t present = neighborPresent(state, pos);
+    if (!canPlace(present, type)) {
+      // Need scaffolding — BFS for it
+      auto scaffold = bfsFindScaffold(state, pos, type);
+      if (!scaffold.empty()) {
+        for (auto &m : scaffold) {
+          buildPath.push_back(m);
+          state = stateSet(state, m.first, m.second);
+          scaffoldCount++;
+        }
+      }
+    }
+    buildPath.push_back({pos, type});
+    state = stateSet(state, pos, type);
+  }
   
   // Print the build path with validation
-  cout << "\n--- Build path (" << buildPath.size() << " steps) ---\n\n";
-  StateType state = 0;
+  cout << "\n--- Build path (" << buildPath.size() << " steps, " 
+       << scaffoldCount << " scaffolding) ---\n\n";
+  state = 0;
   int validSteps = 0, invalidSteps = 0;
   cout << "Start:\n";
   printGrid(state);
@@ -584,6 +666,8 @@ static SearchResult runSlidingWindow() {
     uint32_t present = neighborPresent(state, pos);
     bool valid = canPlace(present, newType);
     if (valid) validSteps++; else invalidSteps++;
+    
+    bool isScaffold = (stateGet(finalState, pos) != newType);
     
     state = stateSet(state, pos, newType);
     
@@ -598,6 +682,9 @@ static SearchResult runSlidingWindow() {
            << ", have 0x" << present << dec << ")";
     } else {
       cout << "  \033[32m✓\033[0m";
+    }
+    if (isScaffold) {
+      cout << "  \033[33m[scaffold]\033[0m";
     }
     cout << "\n";
     printGrid(state);
