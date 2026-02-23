@@ -238,18 +238,26 @@ bfsShortestPath(StateType target) {
 // Processes grid using 3x3 windows with stride=1 along a JPEG-like zigzag path
 // Each window respects constraints from the entire grid (in+out of window)
 
-static vector<int> buildZigzagPath() {
-  // Build diagonal/zigzag path through grid positions
-  // Groups positions by diagonal, then alternates direction per diagonal
+// Build zigzag path starting from a given corner
+// corner: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right
+static vector<int> buildZigzagPath(int corner = 0) {
   int R = GRID.rows, C = GRID.cols;
   vector<vector<pair<int, int>>> diagonals;
   
-  // Group by diagonal (r + c)
+  // Group by diagonal - direction depends on corner
   for (int r = 0; r < R; r++) {
     for (int c = 0; c < C; c++) {
       pair<int, int> coord = {r, c};
       if (!GRID.coordToIdx.count(coord)) continue;
-      int diag = r + c;
+      
+      int diag;
+      switch (corner) {
+        case 0: diag = r + c; break;                       // top-left
+        case 1: diag = r + (C - 1 - c); break;             // top-right
+        case 2: diag = (R - 1 - r) + c; break;             // bottom-left
+        case 3: diag = (R - 1 - r) + (C - 1 - c); break;  // bottom-right
+        default: diag = r + c; break;
+      }
       if (diag >= (int)diagonals.size())
         diagonals.resize(diag + 1);
       diagonals[diag].push_back({r, c});
@@ -393,10 +401,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
 
 static SearchResult runSlidingWindow() {
   SearchResult result{0, 0, 0, 0};
-  vector<int> zigzag = buildZigzagPath();
-  
-  StateType currentState = 0;
-  result.bestState = currentState;
+  result.bestState = 0;
   result.bestScore = 0;
   result.explored = 0;
   
@@ -404,10 +409,10 @@ static SearchResult runSlidingWindow() {
   for (const auto &row : WINDOW_KERNEL_PATTERN) {
     cout << "  " << row << "\n";
   }
-  cout << "Zigzag path length: " << zigzag.size() << "\n";
-  cout << "For each position: explore all reachable states, keep best, move on\n\n";
+  cout << "Chained 4-corner passes (A->B->C->D), repeating until no improvement\n\n";
   
-  // Process each window position sequentially
+  const char* cornerNames[] = {"top-left", "top-right", "bottom-left", "bottom-right"};
+  
   struct WindowStats {
     int posIdx;
     int row, col;
@@ -417,41 +422,90 @@ static SearchResult runSlidingWindow() {
     bool improved;
     int scoreAfter;
   };
-  vector<WindowStats> stats;
   
-  for (int windowIdx = 0; windowIdx < (int)zigzag.size(); windowIdx++) {
-    vector<StateType> exploredStates;
-    long long exploredBefore = result.explored;
+  StateType currentState = 0;
+  int currentScore = 0;
+  int roundNum = 0;
+  
+  while (true) {
+    roundNum++;
+    int scoreAtRoundStart = currentScore;
     
-    auto [cr, cc] = GRID.positions[zigzag[windowIdx]];
+    cout << "============ Round " << roundNum << " (starting score: " << currentScore << ") ============\n\n";
     
-    auto t0 = chrono::steady_clock::now();
-    
-    exploreWindow(currentState, windowIdx, exploredStates,
-                 result.bestScore, result.bestState, result.explored, false);
-    
-    auto t1 = chrono::steady_clock::now();
-    auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
-    
-    bool improved = (result.bestState != currentState);
-    if (improved) {
-      currentState = result.bestState;
+    for (int corner = 0; corner < 4; corner++) {
+      vector<int> zigzag = buildZigzagPath(corner);
+      
+      int bestScore = currentScore;
+      StateType bestState = currentState;
+      long long explored = 0;
+      
+      cout << "=== Pass " << (char)('A' + corner) << ": " << cornerNames[corner] 
+           << " (path length: " << zigzag.size() << ") ===\n";
+      
+      auto passStart = chrono::steady_clock::now();
+      
+      vector<WindowStats> stats;
+      
+      for (int windowIdx = 0; windowIdx < (int)zigzag.size(); windowIdx++) {
+        vector<StateType> exploredStates;
+        long long exploredBefore = explored;
+        
+        int posIdx = zigzag[windowIdx];
+        auto [cr, cc] = GRID.positions[posIdx];
+        
+        auto t0 = chrono::steady_clock::now();
+        
+        exploreWindow(currentState, posIdx, exploredStates,
+                     bestScore, bestState, explored, false);
+        
+        auto t1 = chrono::steady_clock::now();
+        auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
+        
+        bool improved = (bestState != currentState);
+        if (improved) {
+          currentState = bestState;
+        }
+        
+        stats.push_back({posIdx, cr, cc, (int)exploredStates.size(),
+                         explored - exploredBefore, ms, improved, bestScore});
+      }
+      
+      currentScore = bestScore;
+      
+      auto passEnd = chrono::steady_clock::now();
+      auto passMs = chrono::duration_cast<chrono::milliseconds>(passEnd - passStart).count();
+      
+      // Print summary table
+      cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬─────┬───────┐\n";
+      cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ Imp │ Score │\n";
+      cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼─────┼───────┤\n";
+      for (const auto &s : stats) {
+        printf("│ %3d │ (%d, %d)  │ %12d │ %14lld │ %6lldms │  %s  │ %5d │\n",
+               s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored,
+               s.timeMs, s.improved ? "Y" : "N", s.scoreAfter);
+      }
+      cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴─────┴───────┘\n";
+      cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner] << "): score " << currentScore 
+           << " (" << passMs << "ms, " << explored << " states)\n\n";
+      
+      result.explored += explored;
     }
     
-    stats.push_back({zigzag[windowIdx], cr, cc, (int)exploredStates.size(),
-                     result.explored - exploredBefore, ms, improved, result.bestScore});
+    cout << "Round " << roundNum << " complete: score " << scoreAtRoundStart << " -> " << currentScore << "\n";
+    
+    if (currentScore <= scoreAtRoundStart) {
+      cout << "No improvement in round " << roundNum << ", stopping.\n\n";
+      break;
+    } else {
+      cout << "Improved by " << (currentScore - scoreAtRoundStart) << ", starting another round.\n\n";
+    }
   }
   
-  // Print summary table
-  cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬─────┬───────┐\n";
-  cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ Imp │ Score │\n";
-  cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼─────┼───────┤\n";
-  for (const auto &s : stats) {
-    printf("│ %3d │ (%d, %d)  │ %12d │ %14lld │ %6lldms │  %s  │ %5d │\n",
-           s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored,
-           s.timeMs, s.improved ? "Y" : "N", s.scoreAfter);
-  }
-  cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴─────┴───────┘\n";
+  result.bestScore = currentScore;
+  result.bestState = currentState;
+  
+  cout << "Final score after " << roundNum << " round(s): " << result.bestScore << "\n";
   
   // Compute minimal build path from final state
   // Place towers in type order (1, 2, 3, 4) - prerequisites are always satisfied
