@@ -254,10 +254,26 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   while (!q.empty()) {
     size_t layerCount = q.size();
     auto layerStart = chrono::steady_clock::now();
+    int minTowersLeft = g_numPos;
+    int maxTowersLeft = 0;
+    bool anyProcessed = false;
 
     for (size_t i = 0; i < layerCount; i++) {
       StateType cur = q.front();
       q.pop_front();
+      int towersLeft = 0;
+      for (int pos = 0; pos < g_numPos; pos++) {
+        if (stateGet(cur, pos) != 0)
+          towersLeft++;
+      }
+      if (!anyProcessed) {
+        minTowersLeft = towersLeft;
+        maxTowersLeft = towersLeft;
+        anyProcessed = true;
+      } else {
+        minTowersLeft = min(minTowersLeft, towersLeft);
+        maxTowersLeft = max(maxTowersLeft, towersLeft);
+      }
       if (cur == 0) {
         q.clear();
         break;
@@ -292,6 +308,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         prevMs > 0.0 ? ((layerMs - prevMs) / prevMs) * 100.0 : 0.0;
     cout << "Reverse BFS layer " << depth << ": " << layerCount << " states, "
          << layerMs << " ms";
+    if (anyProcessed) {
+      cout << ", towers left min/max " << minTowersLeft << "/" << maxTowersLeft;
+    }
     if (depth > 0) {
       cout << " (" << (pctDelta >= 0.0 ? "+" : "") << pctDelta << "% vs prev)";
     }
@@ -477,8 +496,18 @@ static SearchResult runSlidingWindow() {
   for (const auto &row : WINDOW_KERNEL_PATTERN) {
     cout << "  " << row << "\n";
   }
-  cout << "Chained 4-corner passes (A->B->C->D), repeating until no "
-          "improvement\n\n";
+  const int passOrder[] = {1, 0, 2, 3};
+  auto formatPassOrder = [&]() {
+    string order;
+    for (size_t i = 0; i < std::size(passOrder); i++) {
+      if (i > 0)
+        order += "->";
+      order += char('A' + passOrder[i]);
+    }
+    return order;
+  };
+  cout << "Chained 4-corner passes (" << formatPassOrder()
+       << "), repeating until no improvement\n\n";
 
   const char *cornerNames[] = {"top-left", "top-right", "bottom-left",
                                "bottom-right"};
@@ -504,7 +533,8 @@ static SearchResult runSlidingWindow() {
     cout << "============ Round " << roundNum
          << " (starting score: " << currentScore << ") ============\n\n";
 
-    for (int corner = 0; corner < 4; corner++) {
+    for (int passIndex = 0; passIndex < 4; passIndex++) {
+      int corner = passOrder[passIndex];
       vector<int> zigzag = buildZigzagPath(corner);
 
       int bestScore = currentScore;
