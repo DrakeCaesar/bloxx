@@ -349,15 +349,6 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
       lastReverseLayerMs = layerMs;
       depth++;
-
-      // Check for meet after reverse
-      for (const auto &state : minTowerStates) {
-        if (parentForward.find(state) != parentForward.end()) {
-          meetState = state;
-          found = true;
-          break;
-        }
-      }
     } else {
       // Expand forward
       size_t forwardLayerCount = qForward.size();
@@ -365,6 +356,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       int minForwardTowersLeft = g_numPos;
       int maxForwardTowersLeft = 0;
       bool anyForwardProcessed = false;
+      vector<StateType> maxTowerStates;
       
       for (size_t i = 0; i < forwardLayerCount; i++) {
         StateType cur = qForward.front();
@@ -378,7 +370,16 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
           minForwardTowersLeft = towersLeft;
           maxForwardTowersLeft = towersLeft;
           anyForwardProcessed = true;
+          maxTowerStates.clear();
+          maxTowerStates.push_back(cur);
         } else {
+          if (towersLeft > maxForwardTowersLeft) {
+            maxForwardTowersLeft = towersLeft;
+            maxTowerStates.clear();
+            maxTowerStates.push_back(cur);
+          } else if (towersLeft == maxForwardTowersLeft) {
+            maxTowerStates.push_back(cur);
+          }
           minForwardTowersLeft = min(minForwardTowersLeft, towersLeft);
           maxForwardTowersLeft = max(maxForwardTowersLeft, towersLeft);
         }
@@ -425,6 +426,26 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
       lastForwardLayerMs = forwardLayerMs;
       forwardDepth++;
+
+      // Check for meet: any max-tower state from forward found in reverse visited map
+      for (const auto &state : maxTowerStates) {
+        if (parentReverse.find(state) != parentReverse.end()) {
+          meetState = state;
+          found = true;
+          break;
+        }
+      }
+    }
+
+    // Also check after reverse: any min-tower state from reverse found in forward visited map
+    if (!found) {
+      for (const auto &state : minTowerStates) {
+        if (parentForward.find(state) != parentForward.end()) {
+          meetState = state;
+          found = true;
+          break;
+        }
+      }
     }
   }
 
