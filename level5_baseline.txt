@@ -1,5 +1,5 @@
 
-Reverse BFS visited 1699241 states.
+Reverse BFS visited 3051310 states.
 
 --- Build path (40 steps) ---
 

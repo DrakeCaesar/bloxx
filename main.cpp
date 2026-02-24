@@ -254,7 +254,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   const size_t kPruneThreshold = 10000;
   const int kPruneLowDelta = 3;
-  const int kPruneHighDelta = 9;
+  const int kPruneHighDelta = 3;
 
   auto countTowersLeft = [](StateType s) {
     int towersLeft = 0;
@@ -359,7 +359,18 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   while (!qReverse.empty() && !qForward.empty() && !found) {
     // Ensure both sides expand at least once, then compare times
     bool bothStarted = (depth > 0) && (forwardDepth > 0);
-    bool shouldExpandReverse = !bothStarted ? (depth <= forwardDepth) : (lastReverseLayerMs <= lastForwardLayerMs);
+    bool switchToForward = false;
+    if (bothStarted) {
+      // Switch from reverse to forward only when reverse is at least 5x slower
+      // than the last forward layer. If forward measured 0ms, switch once
+      // reverse becomes measurably non-zero.
+      if (lastForwardLayerMs <= 0.0)
+        switchToForward = (lastReverseLayerMs > 0.0);
+      else
+        switchToForward = (lastReverseLayerMs >= (5.0 * lastForwardLayerMs));
+    }
+    bool shouldExpandReverse = !bothStarted ? (depth <= forwardDepth)
+                                            : !switchToForward;
 
     if (shouldExpandReverse) {
       // Expand reverse
