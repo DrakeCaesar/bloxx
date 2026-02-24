@@ -252,6 +252,80 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   parentForward.reserve(1ull << 26); // ~64M elements
   parentReverse.reserve(1ull << 26); // ~64M elements
 
+  const size_t kPruneThreshold = 10000;
+  const double kPruneKeepFraction = 0.5;
+
+  auto countTowersLeft = [](StateType s) {
+    int towersLeft = 0;
+    for (int pos = 0; pos < g_numPos; pos++) {
+      if (stateGet(s, pos) != 0)
+        towersLeft++;
+    }
+    return towersLeft;
+  };
+
+  auto pruneSide = [&](auto &parentMap, auto &queue, bool keepLowest) {
+    if (parentMap.size() <= kPruneThreshold || queue.empty())
+      return;
+
+    size_t keepCount =
+        max<size_t>(1, (size_t)(queue.size() * kPruneKeepFraction));
+    vector<pair<StateType, int>> scored;
+    scored.reserve(queue.size());
+    for (const auto &s : queue)
+      scored.push_back({s, countTowersLeft(s)});
+
+    if (keepLowest) {
+      nth_element(scored.begin(), scored.begin() + (keepCount - 1),
+                  scored.end(),
+                  [](const auto &a, const auto &b) { return a.second < b.second; });
+    } else {
+      nth_element(scored.begin(), scored.begin() + (keepCount - 1),
+                  scored.end(),
+                  [](const auto &a, const auto &b) { return a.second > b.second; });
+    }
+
+    int cutoff = scored[keepCount - 1].second;
+    robin_hood::unordered_set<StateType> keepStates;
+    keepStates.reserve(keepCount * 2);
+    for (const auto &entry : scored) {
+      if (keepStates.size() >= keepCount)
+        break;
+      if ((keepLowest && entry.second <= cutoff) ||
+          (!keepLowest && entry.second >= cutoff)) {
+        keepStates.insert(entry.first);
+      }
+    }
+
+    std::deque<StateType> newQueue;
+    newQueue.resize(0);
+    for (const auto &s : queue) {
+      if (keepStates.find(s) != keepStates.end())
+        newQueue.push_back(s);
+    }
+    queue.swap(newQueue);
+
+    vector<StateType> stack(keepStates.begin(), keepStates.end());
+    for (size_t i = 0; i < stack.size(); i++) {
+      StateType cur = stack[i];
+      auto it = parentMap.find(cur);
+      if (it == parentMap.end() || it->second.getPos() == -1)
+        continue;
+      StateType parent = it->second.parent;
+      if (keepStates.insert(parent).second)
+        stack.push_back(parent);
+    }
+
+    using MapType = std::decay_t<decltype(parentMap)>;
+    MapType pruned;
+    pruned.reserve(keepStates.size() * 2);
+    for (const auto &kv : parentMap) {
+      if (keepStates.find(kv.first) != keepStates.end())
+        pruned.insert(kv);
+    }
+    parentMap.swap(pruned);
+  };
+
   std::deque<StateType> qForward;
   std::deque<StateType> qReverse;
 
@@ -359,6 +433,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
            minTowersLeft, maxTowersLeft, totalReverse + totalForward);
 
       lastReverseLayerMs = layerMs;
+      if (!found)
+        pruneSide(parentReverse, qReverse, true);
       depth++;
     } else {
       // Expand forward
@@ -441,6 +517,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
              totalReverse + totalForward);
 
       lastForwardLayerMs = forwardLayerMs;
+      if (!found)
+        pruneSide(parentForward, qForward, false);
       forwardDepth++;
     }
   }

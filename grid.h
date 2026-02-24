@@ -37,7 +37,7 @@ using StateType128 = uint128_simd;
 const int MAX_UNLOCKED_TYPE = 4;
 
 // Multi-level configuration
-const int LEVEL_START = 5; // First level to process
+const int LEVEL_START = 1; // First level to process
 const int LEVEL_END = 5;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
