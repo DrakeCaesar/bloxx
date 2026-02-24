@@ -206,6 +206,7 @@ struct SearchResult {
 inline robin_hood::unordered_map<StateType, Transition>
 bfsShortestPath(StateType target) {
   robin_hood::unordered_map<StateType, Transition> path;
+  path.reserve(1ull << 24); // ~16M elements
   struct Entry {
     StateType state;
     int score;
@@ -588,6 +589,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
   // Full BFS within window - explore ALL states reachable by modifying window
   // positions
   robin_hood::unordered_set<StateType> localVisited;
+  localVisited.reserve(1ull << 24); // ~16M elements per window
   struct Entry {
     StateType state;
     int score;
@@ -850,10 +852,12 @@ static SearchResult runSlidingWindow() {
 static SearchResult runIDDFS() {
   SearchResult result{0, 0, 0, 1};
   robin_hood::unordered_set<StateType> globalSeen;
+  globalSeen.reserve(1ull << 24); // ~16M elements
   globalSeen.insert(0);
 
   for (int depthLimit = 1;; depthLimit++) {
     robin_hood::unordered_set<StateType> seen;
+    seen.reserve(1ull << 20); // ~1M elements per depth
     struct Entry {
       StateType state;
       int score;
@@ -936,6 +940,7 @@ void runSingleLevel() {
 
   SearchResult result{0, 0, 0, 0};
   robin_hood::unordered_map<StateType, Transition> visited;
+  visited.reserve(1ull << 24); // ~16M elements
 
   if (SEARCH_MODE == 3) {
     result = runSlidingWindow();
