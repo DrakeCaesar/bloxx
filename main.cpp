@@ -347,18 +347,16 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
             .count();
     double pctDelta =
         lastReverseLayerMs > 0.0 ? ((layerMs - lastReverseLayerMs) / lastReverseLayerMs) * 100.0 : 0.0;
-    if (!headerPrinted && !g_baselineFile) {
+    if (!headerPrinted) {
       cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬─────────┬─────────────┬──────────┐\n";
       cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%      │ Towers L/R  │ L+R      │\n";
       cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼─────────┼─────────────┼──────────┤\n";
       headerPrinted = true;
     }
     totalReverse += layerCount;
-    if (!g_baselineFile) {
-      printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
-             depth, layerCount, totalReverse, layerMs, pctDelta,
-             minTowersLeft, maxTowersLeft, totalReverse + totalForward);
-    }
+    printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
+           depth, layerCount, totalReverse, layerMs, pctDelta,
+           minTowersLeft, maxTowersLeft, totalReverse + totalForward);
 
       lastReverseLayerMs = layerMs;
       depth++;
@@ -430,31 +428,35 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
           lastForwardLayerMs > 0.0
               ? ((forwardLayerMs - lastForwardLayerMs) / lastForwardLayerMs) * 100.0
               : 0.0;
-      if (!headerPrinted && !g_baselineFile) {
+      if (!headerPrinted) {
         cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬─────────┬─────────────┬──────────┐\n";
         cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%      │ Towers L/R  │ L+R      │\n";
         cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼─────────┼─────────────┼──────────┤\n";
         headerPrinted = true;
       }
       totalForward += forwardLayerCount;
-      if (!g_baselineFile) {
-        printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
-               forwardDepth, forwardLayerCount, totalForward, forwardLayerMs,
-               forwardPctDelta, minForwardTowersLeft, maxForwardTowersLeft,
-               totalReverse + totalForward);
-      }
+      printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
+             forwardDepth, forwardLayerCount, totalForward, forwardLayerMs,
+             forwardPctDelta, minForwardTowersLeft, maxForwardTowersLeft,
+             totalReverse + totalForward);
 
       lastForwardLayerMs = forwardLayerMs;
       forwardDepth++;
     }
   }
 
-  if (headerPrinted && !g_baselineFile)
+  if (headerPrinted)
     cout << "└──────┴──────────┴─────────────┴─────────────┴──────────┴─────────┴─────────────┴──────────┘\n";
   
 
   if (!found)
     return {};
+
+  // Redirect output to file if baseline mode is active (after BFS table completes)
+  if (g_baselineFile && g_baselineFile->is_open()) {
+    g_originalCoutBuf = cout.rdbuf();
+    cout.rdbuf(g_baselineFile->rdbuf());
+  }
 
   cout << "\nReverse BFS visited " << parentReverse.size() << " states.\n";
 
@@ -773,16 +775,10 @@ static SearchResult runSlidingWindow() {
   result.bestScore = currentScore;
   result.bestState = currentState;
 
-  cout << "Final score after " << roundNum << " round(s): " << result.bestScore
+  cout << "\nFinal score after " << roundNum << " round(s): " << result.bestScore
        << "\n";
 
   // ── Build path reconstruction: reverse BFS ─────────────────────────────
-  // Redirect output to file if baseline mode is active
-  if (g_baselineFile && g_baselineFile->is_open()) {
-    g_originalCoutBuf = cout.rdbuf();
-    cout.rdbuf(g_baselineFile->rdbuf());
-  }
-  
   StateType finalState = canonical(result.bestState);
   vector<pair<int, int>> buildPath = buildPathFromReverseBfs(finalState);
   if (buildPath.empty()) {
