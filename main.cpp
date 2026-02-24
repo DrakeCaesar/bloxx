@@ -253,7 +253,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   parentReverse.reserve(1ull << 26); // ~64M elements
 
   const size_t kPruneThreshold = 10000;
-  const double kPruneKeepFraction = 0.5;
+  const int kPruneLowDelta = 2;
+  const int kPruneHighDelta = 9;
 
   auto countTowersLeft = [](StateType s) {
     int towersLeft = 0;
@@ -268,33 +269,43 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     if (parentMap.size() <= kPruneThreshold || queue.empty())
       return;
 
-    size_t keepCount =
-        max<size_t>(1, (size_t)(queue.size() * kPruneKeepFraction));
+    int minTowers = g_numPos;
+    int maxTowers = 0;
     vector<pair<StateType, int>> scored;
     scored.reserve(queue.size());
-    for (const auto &s : queue)
-      scored.push_back({s, countTowersLeft(s)});
-
-    if (keepLowest) {
-      nth_element(scored.begin(), scored.begin() + (keepCount - 1),
-                  scored.end(),
-                  [](const auto &a, const auto &b) { return a.second < b.second; });
-    } else {
-      nth_element(scored.begin(), scored.begin() + (keepCount - 1),
-                  scored.end(),
-                  [](const auto &a, const auto &b) { return a.second > b.second; });
+    for (const auto &s : queue) {
+      int towersLeft = countTowersLeft(s);
+      minTowers = min(minTowers, towersLeft);
+      maxTowers = max(maxTowers, towersLeft);
+      scored.push_back({s, towersLeft});
     }
 
-    int cutoff = scored[keepCount - 1].second;
+    int cutoff = keepLowest ? (minTowers + kPruneLowDelta)
+                            : (maxTowers - kPruneHighDelta);
     robin_hood::unordered_set<StateType> keepStates;
-    keepStates.reserve(keepCount * 2);
+    keepStates.reserve(queue.size());
     for (const auto &entry : scored) {
-      if (keepStates.size() >= keepCount)
-        break;
       if ((keepLowest && entry.second <= cutoff) ||
           (!keepLowest && entry.second >= cutoff)) {
         keepStates.insert(entry.first);
       }
+    }
+
+    if (keepStates.empty()) {
+      // Fallback: keep the single best node by tower count.
+      auto bestIt = scored.begin();
+      if (keepLowest) {
+        bestIt = min_element(scored.begin(), scored.end(),
+                             [](const auto &a, const auto &b) {
+                               return a.second < b.second;
+                             });
+      } else {
+        bestIt = max_element(scored.begin(), scored.end(),
+                             [](const auto &a, const auto &b) {
+                               return a.second < b.second;
+                             });
+      }
+      keepStates.insert(bestIt->first);
     }
 
     std::deque<StateType> newQueue;
