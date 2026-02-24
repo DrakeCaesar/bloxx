@@ -38,7 +38,7 @@ const int MAX_UNLOCKED_TYPE = 4;
 
 // Multi-level configuration
 const int LEVEL_START = 1; // First level to process
-const int LEVEL_END = 5;   // Last level to process (inclusive)
+const int LEVEL_END = 1;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int& getCurrentLevel() {
@@ -101,6 +101,8 @@ const string COLORS[] = {
 const string COLOR_NAMES[] = {"Blue", "Red", "Green", "Yellow", "White"};
 const string RESET = "\033[0m";
 const string BLACK_TEXT = "\033[30m"; // Black text for number
+const string EMPTY_BG = "\033[100m";  // Grey background - empty/unplaced position
+const string EMPTY_FG = "\033[90m";  // Grey foreground - empty position (grey bg + grey fg)
 
 // ANSI foreground colors for half-block separators (3x codes)
 const string FG_COLORS[] = {
@@ -110,6 +112,9 @@ const string FG_COLORS[] = {
     "\033[33m", // Yellow foreground - type 3
     "\033[37m"  // White foreground  - type 4
 };
+
+inline const string& bgColor(int t, bool placed) { return placed ? COLORS[t] : EMPTY_BG; }
+inline const string& fgColor(int t, bool placed) { return placed ? FG_COLORS[t] : EMPTY_FG; }
 
 // ══════════════════════════════════════════════════════════════════════════
 // Grid Configuration
@@ -263,13 +268,12 @@ extern StateType stateSet(StateType s, int pos, int val);
 
 inline void printGrid(StateType s) {
   for (int r = 0; r < GRID.rows; r++) {
-    // Left padding - only if first cell exists
     pair<int, int> firstCoord = {r, 0};
     if (GRID.coordToIdx.count(firstCoord)) {
       int firstT = stateGet(s, GRID.coordToIdx[firstCoord]);
       cout << FG_COLORS[firstT] << "▐" << RESET;
     } else {
-      cout << " "; // Space if no cell at line start
+      cout << " ";
     }
 
     for (int c = 0; c < GRID.cols; c++) {
@@ -278,42 +282,106 @@ inline void printGrid(StateType s) {
         int t = stateGet(s, GRID.coordToIdx[coord]);
         cout << COLORS[t] << BLACK_TEXT << t << RESET;
       } else {
-        cout << " "; // Empty space for non-grid positions
+        cout << " ";
       }
 
-      // Separator between cells
       if (c < GRID.cols - 1) {
         pair<int, int> nextCoord = {r, c + 1};
         bool currExists = GRID.coordToIdx.count(coord);
         bool nextExists = GRID.coordToIdx.count(nextCoord);
 
         if (currExists && nextExists) {
-          // Both cells exist: colored separator
           int t = stateGet(s, GRID.coordToIdx[coord]);
           int nextT = stateGet(s, GRID.coordToIdx[nextCoord]);
           cout << FG_COLORS[nextT] << COLORS[t] << "▐" << RESET;
         } else if (currExists && !nextExists) {
-          // Cell then gap: right half block with current cell color
           int t = stateGet(s, GRID.coordToIdx[coord]);
           cout << FG_COLORS[t] << "▌" << RESET;
         } else if (!currExists && nextExists) {
-          // Gap then cell: left half block with next cell color
           int nextT = stateGet(s, GRID.coordToIdx[nextCoord]);
           cout << FG_COLORS[nextT] << "▐" << RESET;
         } else {
-          // Neither exists: space
           cout << " ";
         }
       }
     }
 
-    // Right padding - only if last cell exists
     pair<int, int> lastCoord = {r, GRID.cols - 1};
     if (GRID.coordToIdx.count(lastCoord)) {
       int lastT = stateGet(s, GRID.coordToIdx[lastCoord]);
       cout << FG_COLORS[lastT] << "▌" << RESET << "\n";
     } else {
-      cout << " \n"; // Space if no cell at line end
+      cout << " \n";
+    }
+  }
+}
+
+// printGrid with placed mask: bit i=1 means position i has been explicitly built.
+// Unplaced positions (bit=0, type=0) are rendered as dark empty cells.
+inline void printGrid(StateType s, uint64_t placedMask) {
+  for (int r = 0; r < GRID.rows; r++) {
+    pair<int, int> firstCoord = {r, 0};
+    if (GRID.coordToIdx.count(firstCoord)) {
+      int idx = GRID.coordToIdx[firstCoord];
+      int firstT = stateGet(s, idx);
+      bool p = (placedMask >> idx) & 1;
+      cout << fgColor(firstT, p) << "▐" << RESET;
+    } else {
+      cout << " ";
+    }
+
+    for (int c = 0; c < GRID.cols; c++) {
+      pair<int, int> coord = {r, c};
+      if (GRID.coordToIdx.count(coord)) {
+        int idx = GRID.coordToIdx[coord];
+        int t = stateGet(s, idx);
+        bool p = (placedMask >> idx) & 1;
+        if (p) {
+          cout << COLORS[t] << BLACK_TEXT << t << RESET;
+        } else {
+          cout << EMPTY_BG << EMPTY_FG << "·" << RESET;
+        }
+      } else {
+        cout << " ";
+      }
+
+      if (c < GRID.cols - 1) {
+        pair<int, int> nextCoord = {r, c + 1};
+        bool currExists = GRID.coordToIdx.count(coord);
+        bool nextExists = GRID.coordToIdx.count(nextCoord);
+
+        if (currExists && nextExists) {
+          int idx = GRID.coordToIdx[coord];
+          int nextIdx = GRID.coordToIdx[nextCoord];
+          int t = stateGet(s, idx);
+          int nextT = stateGet(s, nextIdx);
+          bool p = (placedMask >> idx) & 1;
+          bool np = (placedMask >> nextIdx) & 1;
+          cout << fgColor(nextT, np) << bgColor(t, p) << "▐" << RESET;
+        } else if (currExists && !nextExists) {
+          int idx = GRID.coordToIdx[coord];
+          int t = stateGet(s, idx);
+          bool p = (placedMask >> idx) & 1;
+          cout << fgColor(t, p) << "▌" << RESET;
+        } else if (!currExists && nextExists) {
+          int nextIdx = GRID.coordToIdx[nextCoord];
+          int nextT = stateGet(s, nextIdx);
+          bool np = (placedMask >> nextIdx) & 1;
+          cout << fgColor(nextT, np) << "▐" << RESET;
+        } else {
+          cout << " ";
+        }
+      }
+    }
+
+    pair<int, int> lastCoord = {r, GRID.cols - 1};
+    if (GRID.coordToIdx.count(lastCoord)) {
+      int idx = GRID.coordToIdx[lastCoord];
+      int lastT = stateGet(s, idx);
+      bool p = (placedMask >> idx) & 1;
+      cout << fgColor(lastT, p) << "▌" << RESET << "\n";
+    } else {
+      cout << " \n";
     }
   }
 }

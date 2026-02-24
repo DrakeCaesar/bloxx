@@ -159,8 +159,130 @@ inline bool canPlace(uint32_t present, int type) {
 }
 
 // ── Path reconstruction ────────────────────────────────────────────────────
-// Canonical-aware: all intermediate states are canonicalized so they match
-// the transitions stored in the visited map (which live in canonical space).
+// Forward declaration (defined later with sliding window code)
+static int scoreGrid(StateType state);
+// expandPathForEmptyBoard: converts a path from the solver's "all zeros = blue"
+// model to a path that starts from a truly empty board.
+//
+// For each step (pos, newType), before we can upgrade pos, we need:
+//   1. pos itself to be explicitly placed (as blue) if not already
+//   2. For each required neighbor type 0..newType-1, at least one neighbor
+//      must be explicitly placed with that type.
+//      - Neighbors with type > 0 were placed by earlier explicit steps.
+//      - Neighbors with type == 0 are "implicit blue" and need an explicit
+//        "place blue" step inserted here.
+//
+// Tracks a physical (non-canonical) state so neighbor lookups against
+// GRID.neighbors[] remain consistent with position indices.
+
+static vector<pair<int,int>> expandPathForEmptyBoard(const vector<pair<int,int>>& steps) {
+  vector<pair<int,int>> out;
+  out.reserve(steps.size() * 2);
+  uint64_t placed = 0;   // bit i = position i has been explicitly placed
+  StateType phys = 0;    // canonical state — mirrors what printExpandedPath tracks
+
+  for (auto [pos, newType] : steps) {
+    // For each required neighbor type req in 0..newType-1,
+    // ensure at least one placed neighbor has that type.
+    // Unplaced neighbors with type 0 are "implicit blue" in the solver model;
+    // insert an explicit place-blue step for one such neighbor if needed.
+    for (int req = 0; req < newType; req++) {
+      bool satisfied = false;
+      int candidateNb = -1;
+      for (int nb : GRID.neighbors[pos]) {
+        int nbType = stateGet(phys, nb);
+        if (nbType == req) {
+          if ((placed >> nb) & 1) {
+            satisfied = true;  // already explicitly placed with correct type
+            break;
+          } else if (req == 0) {
+            // Implicit blue (unplaced, type 0) — can satisfy req=0 once placed
+            candidateNb = nb;
+          }
+        }
+      }
+      if (!satisfied && candidateNb != -1) {
+        out.push_back({candidateNb, 0});
+        placed |= (1ull << candidateNb);
+        // Blue placements don't change canonical state (0 is already 0)
+      }
+    }
+
+    // Execute the actual step — keep phys canonical to mirror BFS state space
+    out.push_back({pos, newType});
+    placed |= (1ull << pos);
+    phys = canonical(stateSet(phys, pos, newType));
+  }
+  return out;
+}
+
+static void printExpandedPath(const vector<pair<int,int>>& expandedSteps) {
+  cout << "\n--- Build path (" << expandedSteps.size() << " steps) ---\n\n";
+  cout << "Start (empty board):\n";
+  printGrid(StateType(0), uint64_t(0));
+
+  StateType canonState = 0;   // canonical state — for validity checks
+  StateType displayState = 0; // physical state — stable orientation for display
+  uint64_t placedMask = 0;    // physical positions that have been placed
+  int validSteps = 0, invalidSteps = 0;
+  int stepNum = 1;
+
+  for (auto [pos, newType] : expandedSteps) {
+    // pos is a position index in canonical space.
+    // Find which symmetry maps our displayState to its canonical form,
+    // then invert it to find the physical position.
+    int usedSymm = 0;
+    for (int k = 0; k < g_numSymm; k++) {
+      if (applyPerm(displayState, g_symmPerm[k]) == canonState) {
+        usedSymm = k;
+        break;
+      }
+    }
+    // Build inverse permutation: inversePerm[canonical_pos] = physical_pos
+    int inversePerm[49];
+    for (int i = 0; i < g_numPos; i++)
+      inversePerm[g_symmPerm[usedSymm][i]] = i;
+
+    int physPos = inversePerm[pos];
+    bool wasPlaced = (placedMask >> physPos) & 1;
+    int oldType = wasPlaced ? stateGet(displayState, physPos) : -1;
+
+    // Validity check in canonical space
+    uint32_t present = neighborPresent(canonState, pos);
+    bool valid = canPlace(present, newType);
+    if (valid) validSteps++; else invalidSteps++;
+
+    // Update canonical state
+    canonState = canonical(stateSet(canonState, pos, newType));
+    // Update physical display state at the physical position
+    displayState = stateSet(displayState, physPos, newType);
+    placedMask |= (1ull << physPos);
+
+    auto [r, c] = GRID.positions[physPos];
+    cout << "\nStep " << stepNum << ": pos " << physPos << " (" << r << "," << c << ")  ";
+    if (oldType == -1) {
+      cout << "empty -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType]
+           << RESET << " (" << newType << ")";
+    } else {
+      cout << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET
+           << " (" << oldType << ") -> " << COLORS[newType] << BLACK_TEXT
+           << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
+    }
+    cout << (valid ? "  \033[32m\u2713\033[0m" : "  \033[31m\u2717 INVALID\033[0m") << "\n";
+    printGrid(displayState, placedMask);
+    stepNum++;
+  }
+
+  int reachedScore = scoreGrid(displayState);
+  cout << "\nBuild path: " << expandedSteps.size() << " steps, " << validSteps
+       << " valid, " << invalidSteps << " invalid";
+  if (invalidSteps == 0) {
+    cout << " \033[32m\u2014 ALL VALID\033[0m";
+  } else {
+    cout << " \033[31m\u2014 HAS INVALID STEPS\033[0m";
+  }
+  cout << "\nReached score: " << reachedScore << "\n";
+}
 
 template <typename MapType>
 inline void printBuildPath(StateType bestState, const MapType &visited) {
@@ -172,26 +294,7 @@ inline void printBuildPath(StateType bestState, const MapType &visited) {
     cur = tr.parent;
   }
   reverse(steps.begin(), steps.end());
-
-  cout << "\n--- Build path (" << steps.size() << " steps) ---\n\n";
-
-  StateType state = 0;
-  cout << "Start:\n";
-  printGrid(state);
-
-  for (int i = 0; i < (int)steps.size(); i++) {
-    int pos = steps[i].first;
-    int newType = steps[i].second;
-    int oldType = stateGet(state, pos);
-    // Canonicalize so intermediate state matches the next transition's parent
-    state = canonical(stateSet(state, pos, newType));
-
-    cout << "\nStep " << (i + 1) << ": pos " << pos << "  " << COLORS[oldType]
-         << BLACK_TEXT << COLOR_NAMES[oldType] << RESET << " (" << oldType
-         << ") -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType]
-         << RESET << " (" << newType << ")\n";
-    printGrid(state);
-  }
+  printExpandedPath(expandPathForEmptyBoard(steps));
 }
 
 struct SearchResult {
@@ -874,50 +977,7 @@ static SearchResult runSlidingWindow() {
     return result;
   }
 
-  cout << "\n--- Build path (" << buildPath.size() << " steps) ---\n\n";
-  StateType state = 0;
-  int validSteps = 0, invalidSteps = 0;
-  cout << "Start:\n";
-  printGrid(state);
-  for (int i = 0; i < (int)buildPath.size(); i++) {
-    int pos = buildPath[i].first;
-    int newType = buildPath[i].second;
-    int oldType = stateGet(state, pos);
-
-    uint32_t present = neighborPresent(state, pos);
-    bool valid = canPlace(present, newType);
-    if (valid)
-      validSteps++;
-    else
-      invalidSteps++;
-
-    state = canonical(stateSet(state, pos, newType));
-
-    auto [r, c] = GRID.positions[pos];
-    cout << "\nStep " << (i + 1) << ": pos " << pos << " (" << r << "," << c
-         << ")  " << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType]
-         << RESET << " (" << oldType << ") -> " << COLORS[newType] << BLACK_TEXT
-         << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
-    if (!valid) {
-      cout << "  \033[31m✗ INVALID\033[0m (need 0x" << hex
-           << g_requiredMask[newType] << ", have 0x" << present << dec << ")";
-    } else {
-      cout << "  \033[32m✓\033[0m";
-    }
-    cout << "\n";
-    printGrid(state);
-  }
-
-  int reachedScore = scoreGrid(state);
-  cout << "\nBuild path: " << buildPath.size() << " steps, " << validSteps
-       << " valid, " << invalidSteps << " invalid";
-  if (invalidSteps == 0) {
-    cout << " \033[32m— ALL VALID\033[0m";
-  } else {
-    cout << " \033[31m— HAS INVALID STEPS\033[0m";
-  }
-  cout << "\nReached score: " << reachedScore
-       << " (target: " << result.bestScore << ")\n";
+  printExpandedPath(expandPathForEmptyBoard(buildPath));
 
   cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0;
