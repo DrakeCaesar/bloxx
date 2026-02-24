@@ -38,7 +38,7 @@ const int MAX_UNLOCKED_TYPE = 4;
 
 // Multi-level configuration
 const int LEVEL_START = 1; // First level to process
-const int LEVEL_END = 1;   // Last level to process (inclusive)
+const int LEVEL_END = 5;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int& getCurrentLevel() {
