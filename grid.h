@@ -36,6 +36,10 @@ using StateType128 = uint128_simd;
 // Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
 const int MAX_UNLOCKED_TYPE = 4;
 
+// Baseline generation: generate baselines for unlocked types in this range
+const int UNLOCKED_TYPE_START = 1; // First type to generate baseline for
+const int UNLOCKED_TYPE_END = 4;   // Last type to generate baseline for
+
 // Multi-level configuration
 const int LEVEL_START = 1; // First level to process
 const int LEVEL_END = 5;   // Last level to process (inclusive)

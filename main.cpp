@@ -1235,39 +1235,42 @@ void runSingleLevel() {
 }
 
 int main() {
-  // Process configured level range and save baseline outputs
+  // Process configured level range and all unlocked tower types
   cout << "═══════════════════════════════════════════════════════════════\n";
   cout << "       Tower Blox Deluxe Solver - Multi-Level Baseline\n";
   cout << "═══════════════════════════════════════════════════════════════\n\n";
   
   for (int level = LEVEL_START; level <= LEVEL_END; level++) {
-    // Open file for this level
-    string filename = "../level" + to_string(level) + "_baseline.txt";
-    ofstream outFile(filename);
-    if (!outFile) {
-      cerr << "Failed to open " << filename << "\n";
-      continue;
+    for (int unlockedType = UNLOCKED_TYPE_START; unlockedType <= UNLOCKED_TYPE_END; unlockedType++) {
+      // Generate filename with both level and unlocked type
+      string filename = "../level" + to_string(level) + "_type" + to_string(unlockedType) + "_baseline.txt";
+      ofstream outFile(filename);
+      if (!outFile) {
+        cerr << "Failed to open " << filename << "\n";
+        continue;
+      }
+      
+      // Set global file pointer (will be used during reverse BFS)
+      g_baselineFile = &outFile;
+      
+      // Reinitialize for this level and tower type
+      reinitializeGrid(level);
+      GRID.computeMaxTypes(unlockedType);
+      
+      // Run the solver (console output for sliding window, file output for reverse BFS)
+      runSingleLevel();
+      
+      // Clear global file pointer
+      g_baselineFile = nullptr;
+      outFile.close();
+      
+      // Print progress to console
+      cout << "✓ Level " << level << " (unlocked: 0-" << unlockedType << ") complete → " << filename << "\n";
     }
-    
-    // Set global file pointer (will be used during reverse BFS)
-    g_baselineFile = &outFile;
-    
-    // Reinitialize for this level
-    reinitializeGrid(level);
-    
-    // Run the solver (console output for sliding window, file output for reverse BFS)
-    runSingleLevel();
-    
-    // Clear global file pointer
-    g_baselineFile = nullptr;
-    outFile.close();
-    
-    // Print progress to console
-    cout << "✓ Level " << level << " complete → " << filename << "\n";
   }
   
   cout << "\n═══════════════════════════════════════════════════════════════\n";
-  cout << "All baseline files generated successfully!\n";
+  cout << "All 25 baseline files generated successfully!\n";
   cout << "═══════════════════════════════════════════════════════════════\n";
 
   return 0;
