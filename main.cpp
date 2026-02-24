@@ -213,6 +213,7 @@ static vector<pair<int,int>> expandPathForEmptyBoard(const vector<pair<int,int>>
     placed |= (1ull << pos);
     phys = canonical(stateSet(phys, pos, newType));
   }
+
   return out;
 }
 
@@ -271,6 +272,23 @@ static void printExpandedPath(const vector<pair<int,int>>& expandedSteps) {
     cout << (valid ? "  \033[32m\u2713\033[0m" : "  \033[31m\u2717 INVALID\033[0m") << "\n";
     printGrid(displayState, placedMask);
     stepNum++;
+  }
+
+  // Any physical position never explicitly placed is an implicit blue that
+  // stayed blue the entire game. Show a final step for each one.
+  for (int i = 0; i < g_numPos; i++) {
+    if (!((placedMask >> i) & 1)) {
+      placedMask |= (1ull << i);
+      // displayState already has 0 (blue) at this position
+      auto [r, c] = GRID.positions[i];
+      cout << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c << ")  ";
+      cout << "empty -> " << COLORS[0] << BLACK_TEXT << COLOR_NAMES[0]
+           << RESET << " (0)";
+      cout << "  \033[32m\u2713\033[0m" << "\n";
+      printGrid(displayState, placedMask);
+      stepNum++;
+      validSteps++;
+    }
   }
 
   int reachedScore = scoreGrid(displayState);
