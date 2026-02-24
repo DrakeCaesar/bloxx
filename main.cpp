@@ -241,26 +241,47 @@ bfsShortestPath(StateType target) {
 // current state. The prior type at that position can be any other value,
 // without needing to satisfy its own placement requirements.
 static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
-  ankerl::unordered_dense::map<StateType, Transition> parent;
-  parent.reserve(1ull << 26); // ~64M elements
+  ankerl::unordered_dense::map<StateType, Transition> parentForward;
+  ankerl::unordered_dense::map<StateType, Transition> parentReverse;
+  parentForward.reserve(1ull << 26); // ~64M elements
+  parentReverse.reserve(1ull << 26); // ~64M elements
 
-  std::deque<StateType> q;
+  std::deque<StateType> qForward;
+  std::deque<StateType> qReverse;
 
-  parent[finalState] = {finalState, -1, -1};
-  q.push_back(finalState);
+  parentForward[0] = {0, -1, -1};
+  qForward.push_back(0);
+  parentReverse[finalState] = {finalState, -1, -1};
+  qReverse.push_back(finalState);
 
   size_t depth = 0;
-  double prevMs = 0.0;
-  while (!q.empty()) {
-    size_t layerCount = q.size();
-    auto layerStart = chrono::steady_clock::now();
-    int minTowersLeft = g_numPos;
-    int maxTowersLeft = 0;
-    bool anyProcessed = false;
+  double lastReverseLayerMs = 0.0;
+  double lastForwardLayerMs = -1.0; // Start negative so reverse expands first
+  size_t forwardDepth = 0;
+  bool found = false;
+  StateType meetState = 0;
+  size_t totalReverse = 0;  // For display only
+  size_t totalForward = 0;  // For display only
+  bool headerPrinted = false;
+  vector<StateType> minTowerStates;
+
+  while (!qReverse.empty() && !qForward.empty() && !found) {
+    // Ensure both sides expand at least once, then compare times
+    bool bothStarted = (depth > 0) && (forwardDepth > 0);
+    bool shouldExpandReverse = !bothStarted ? (depth <= forwardDepth) : (lastReverseLayerMs <= lastForwardLayerMs);
+
+    if (shouldExpandReverse) {
+      // Expand reverse
+      size_t layerCount = qReverse.size();
+      auto layerStart = chrono::steady_clock::now();
+      int minTowersLeft = g_numPos;
+      int maxTowersLeft = 0;
+      bool anyProcessed = false;
+      minTowerStates.clear();
 
     for (size_t i = 0; i < layerCount; i++) {
-      StateType cur = q.front();
-      q.pop_front();
+      StateType cur = qReverse.front();
+      qReverse.pop_front();
       int towersLeft = 0;
       for (int pos = 0; pos < g_numPos; pos++) {
         if (stateGet(cur, pos) != 0)
@@ -270,12 +291,21 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         minTowersLeft = towersLeft;
         maxTowersLeft = towersLeft;
         anyProcessed = true;
+        minTowerStates.clear();
+        minTowerStates.push_back(cur);
       } else {
+        if (towersLeft < minTowersLeft) {
+          minTowersLeft = towersLeft;
+          minTowerStates.clear();
+          minTowerStates.push_back(cur);
+        } else if (towersLeft == minTowersLeft) {
+          minTowerStates.push_back(cur);
+        }
         minTowersLeft = min(minTowersLeft, towersLeft);
         maxTowersLeft = max(maxTowersLeft, towersLeft);
       }
       if (cur == 0) {
-        q.clear();
+        qReverse.clear();
         break;
       }
 
@@ -292,10 +322,10 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
           if (prevType == curType)
             continue;
           StateType next = stateSet(cur, pos, prevType);
-          if (parent
+          if (parentReverse
                   .emplace(next, Transition{cur, (int8_t)pos, (int8_t)curType})
                   .second)
-            q.push_back(next);
+            qReverse.push_back(next);
         }
       }
     }
@@ -305,33 +335,126 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
             .count();
     double pctDelta =
-        prevMs > 0.0 ? ((layerMs - prevMs) / prevMs) * 100.0 : 0.0;
-    cout << "Reverse BFS layer " << depth << ": " << layerCount << " states, "
-         << layerMs << " ms";
-    if (anyProcessed) {
-      cout << ", towers left min/max " << minTowersLeft << "/" << maxTowersLeft;
+        lastReverseLayerMs > 0.0 ? ((layerMs - lastReverseLayerMs) / lastReverseLayerMs) * 100.0 : 0.0;
+    if (!headerPrinted) {
+      cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬───────┬─────────────┬──────────┐\n";
+      cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%    │ Towers L/R  │ L+R      │\n";
+      cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼───────┼─────────────┼──────────┤\n";
+      headerPrinted = true;
     }
-    if (depth > 0) {
-      cout << " (" << (pctDelta >= 0.0 ? "+" : "") << pctDelta << "% vs prev)";
-    }
-    cout << "\n";
+    totalReverse += layerCount;
+    printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %5.1f │ %2d / %-2d     │ %8zu │\n",
+           depth, layerCount, totalReverse, layerMs, pctDelta,
+           minTowersLeft, maxTowersLeft, totalReverse + totalForward);
 
-    prevMs = layerMs;
-    depth++;
+      lastReverseLayerMs = layerMs;
+      depth++;
+
+      // Check for meet after reverse
+      for (const auto &state : minTowerStates) {
+        if (parentForward.find(state) != parentForward.end()) {
+          meetState = state;
+          found = true;
+          break;
+        }
+      }
+    } else {
+      // Expand forward
+      size_t forwardLayerCount = qForward.size();
+      auto forwardLayerStart = chrono::steady_clock::now();
+      int minForwardTowersLeft = g_numPos;
+      int maxForwardTowersLeft = 0;
+      bool anyForwardProcessed = false;
+      
+      for (size_t i = 0; i < forwardLayerCount; i++) {
+        StateType cur = qForward.front();
+        qForward.pop_front();
+        int towersLeft = 0;
+        for (int pos = 0; pos < g_numPos; pos++) {
+          if (stateGet(cur, pos) != 0)
+            towersLeft++;
+        }
+        if (!anyForwardProcessed) {
+          minForwardTowersLeft = towersLeft;
+          maxForwardTowersLeft = towersLeft;
+          anyForwardProcessed = true;
+        } else {
+          minForwardTowersLeft = min(minForwardTowersLeft, towersLeft);
+          maxForwardTowersLeft = max(maxForwardTowersLeft, towersLeft);
+        }
+
+        for (int pos = 0; pos < g_numPos; pos++) {
+          int curType = stateGet(cur, pos);
+          if (curType == 4)
+            continue;
+          uint32_t present = neighborPresent(cur, pos);
+          for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+            if (newType == curType)
+              continue;
+            if (!canPlace(present, newType))
+              continue;
+            StateType next = stateSet(cur, pos, newType);
+            if (parentForward
+                    .emplace(next,
+                             Transition{cur, (int8_t)pos, (int8_t)newType})
+                    .second)
+              qForward.push_back(next);
+          }
+        }
+      }
+      
+      auto forwardLayerEnd = chrono::steady_clock::now();
+      double forwardLayerMs = chrono::duration_cast<chrono::milliseconds>(
+                                  forwardLayerEnd - forwardLayerStart)
+                                  .count();
+      double forwardPctDelta =
+          lastForwardLayerMs > 0.0
+              ? ((forwardLayerMs - lastForwardLayerMs) / lastForwardLayerMs) * 100.0
+              : 0.0;
+      if (!headerPrinted) {
+        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬───────┬─────────────┬──────────┐\n";
+        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%    │ Towers L/R  │ L+R      │\n";
+        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼───────┼─────────────┼──────────┤\n";
+        headerPrinted = true;
+      }
+      totalForward += forwardLayerCount;
+      printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %5.1f │ %2d / %-2d     │ %8zu │\n",
+             forwardDepth, forwardLayerCount, totalForward, forwardLayerMs,
+             forwardPctDelta, minForwardTowersLeft, maxForwardTowersLeft,
+             totalReverse + totalForward);
+
+      lastForwardLayerMs = forwardLayerMs;
+      forwardDepth++;
+    }
   }
 
-  if (!parent.count(0))
+  if (headerPrinted)
+    cout << "└──────┴──────────┴─────────────┴─────────────┴──────────┴──────┴──────────────┴──────────┘\n";
+  
+
+  if (!found)
     return {};
 
-  // Reconstruct forward build path: start at base state, move toward final.
-  cout << "\nReverse BFS visited " << parent.size() << " states.\n";
+  cout << "\nReverse BFS visited " << parentReverse.size() << " states.\n";
+
   vector<pair<int, int>> steps;
-  StateType cur = 0;
-  while (parent.at(cur).getPos() != -1) {
-    const auto &tr = parent.at(cur);
+  vector<pair<int, int>> stepsForward;
+  StateType cur = meetState;
+  while (parentForward.at(cur).getPos() != -1) {
+    const auto &tr = parentForward.at(cur);
+    stepsForward.push_back({tr.getPos(), tr.getType()});
+    cur = tr.parent;
+  }
+  reverse(stepsForward.begin(), stepsForward.end());
+
+  cur = meetState;
+  while (parentReverse.at(cur).getPos() != -1) {
+    const auto &tr = parentReverse.at(cur);
     steps.push_back({tr.getPos(), tr.getType()});
     cur = tr.parent;
   }
+
+  steps.insert(steps.begin(), stepsForward.begin(), stepsForward.end());
   return steps;
 }
 
