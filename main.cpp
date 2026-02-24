@@ -1,6 +1,7 @@
 #include <ankerl/unordered_dense.h>
 #include <chrono>
 #include <deque>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <robin_hood.h>
@@ -9,6 +10,10 @@
 #include "grid.h"
 
 using namespace std;
+
+// Global file stream for baseline output (only used for reverse BFS section)
+static ofstream* g_baselineFile = nullptr;
+static streambuf* g_originalCoutBuf = nullptr;
 
 // Hash specialization for uint128_simd (must be after including grid.h)
 namespace robin_hood {
@@ -341,16 +346,18 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
             .count();
     double pctDelta =
         lastReverseLayerMs > 0.0 ? ((layerMs - lastReverseLayerMs) / lastReverseLayerMs) * 100.0 : 0.0;
-    if (!headerPrinted) {
+    if (!headerPrinted && !g_baselineFile) {
       cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬─────────┬─────────────┬──────────┐\n";
       cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%      │ Towers L/R  │ L+R      │\n";
       cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼─────────┼─────────────┼──────────┤\n";
       headerPrinted = true;
     }
     totalReverse += layerCount;
-    printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
-           depth, layerCount, totalReverse, layerMs, pctDelta,
-           minTowersLeft, maxTowersLeft, totalReverse + totalForward);
+    if (!g_baselineFile) {
+      printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
+             depth, layerCount, totalReverse, layerMs, pctDelta,
+             minTowersLeft, maxTowersLeft, totalReverse + totalForward);
+    }
 
       lastReverseLayerMs = layerMs;
       depth++;
@@ -422,24 +429,26 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
           lastForwardLayerMs > 0.0
               ? ((forwardLayerMs - lastForwardLayerMs) / lastForwardLayerMs) * 100.0
               : 0.0;
-      if (!headerPrinted) {
+      if (!headerPrinted && !g_baselineFile) {
         cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬─────────┬─────────────┬──────────┐\n";
         cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%      │ Towers L/R  │ L+R      │\n";
         cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼─────────┼─────────────┼──────────┤\n";
         headerPrinted = true;
       }
       totalForward += forwardLayerCount;
-      printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
-             forwardDepth, forwardLayerCount, totalForward, forwardLayerMs,
-             forwardPctDelta, minForwardTowersLeft, maxForwardTowersLeft,
-             totalReverse + totalForward);
+      if (!g_baselineFile) {
+        printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
+               forwardDepth, forwardLayerCount, totalForward, forwardLayerMs,
+               forwardPctDelta, minForwardTowersLeft, maxForwardTowersLeft,
+               totalReverse + totalForward);
+      }
 
       lastForwardLayerMs = forwardLayerMs;
       forwardDepth++;
     }
   }
 
-  if (headerPrinted)
+  if (headerPrinted && !g_baselineFile)
     cout << "└──────┴──────────┴─────────────┴─────────────┴──────────┴─────────┴─────────────┴──────────┘\n";
   
 
@@ -766,6 +775,12 @@ static SearchResult runSlidingWindow() {
        << "\n";
 
   // ── Build path reconstruction: reverse BFS ─────────────────────────────
+  // Redirect output to file if baseline mode is active
+  if (g_baselineFile && g_baselineFile->is_open()) {
+    g_originalCoutBuf = cout.rdbuf();
+    cout.rdbuf(g_baselineFile->rdbuf());
+  }
+  
   StateType finalState = canonical(result.bestState);
   vector<pair<int, int>> buildPath = buildPathFromReverseBfs(finalState);
   if (buildPath.empty()) {
@@ -822,6 +837,13 @@ static SearchResult runSlidingWindow() {
 
   cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0;
+  
+  // Restore cout if it was redirected
+  if (g_originalCoutBuf) {
+    cout.rdbuf(g_originalCoutBuf);
+    g_originalCoutBuf = nullptr;
+  }
+  
   return result;
 }
 
@@ -892,9 +914,10 @@ static SearchResult runIDDFS() {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
-int main() {
+void runSingleLevel() {
   cout << "Tower Blox Deluxe Solver\n";
   cout << "========================\n";
+  cout << "Level: " << getCurrentLevel() << "\n";
   cout << "Tower types unlocked (0-" << MAX_UNLOCKED_TYPE << "):\n";
   for (int i = 0; i <= MAX_UNLOCKED_TYPE; i++)
     cout << "  " << COLORS[i] << BLACK_TEXT << i << RESET << " ("
@@ -1010,6 +1033,43 @@ int main() {
     auto pathMap = bfsShortestPath(result.bestState);
     printBuildPath(result.bestState, pathMap);
   }
+}
+
+int main() {
+  // Process configured level range and save baseline outputs
+  cout << "═══════════════════════════════════════════════════════════════\n";
+  cout << "       Tower Blox Deluxe Solver - Multi-Level Baseline\n";
+  cout << "═══════════════════════════════════════════════════════════════\n\n";
+  
+  for (int level = LEVEL_START; level <= LEVEL_END; level++) {
+    // Open file for this level
+    string filename = "../level" + to_string(level) + "_baseline.ans";
+    ofstream outFile(filename);
+    if (!outFile) {
+      cerr << "Failed to open " << filename << "\n";
+      continue;
+    }
+    
+    // Set global file pointer (will be used during reverse BFS)
+    g_baselineFile = &outFile;
+    
+    // Reinitialize for this level
+    reinitializeGrid(level);
+    
+    // Run the solver (console output for sliding window, file output for reverse BFS)
+    runSingleLevel();
+    
+    // Clear global file pointer
+    g_baselineFile = nullptr;
+    outFile.close();
+    
+    // Print progress to console
+    cout << "✓ Level " << level << " complete → " << filename << "\n";
+  }
+  
+  cout << "\n═══════════════════════════════════════════════════════════════\n";
+  cout << "All baseline files generated successfully!\n";
+  cout << "═══════════════════════════════════════════════════════════════\n";
 
   return 0;
 }

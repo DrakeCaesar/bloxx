@@ -28,13 +28,23 @@ using StateType128 = uint128_simd;
 // Configuration Constants
 // ══════════════════════════════════════════════════════════════════════════
 
-#define LEVEL 4 // Grid level (1-5), must be #define for preprocessor
+#define LEVEL 2 // Grid level (1-5), must be #define for preprocessor
 // 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 =
 // Sliding Window
 [[maybe_unused]] const int SEARCH_MODE = 3;
 // Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
 // Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
 const int MAX_UNLOCKED_TYPE = 4;
+
+// Multi-level configuration
+const int LEVEL_START = 1; // First level to process
+const int LEVEL_END = 4;   // Last level to process (inclusive)
+
+// Current level being processed (for multi-level runs)
+inline int& getCurrentLevel() {
+  static int currentLevel = LEVEL;
+  return currentLevel;
+}
 // Sliding window parameters
 const int MAX_DEPTH = 10; // Maximum BFS depth per window
 const int SCAFFOLD_DEPTH =
@@ -68,11 +78,18 @@ inline const vector<string> &getWindowKernelPattern() {
 
 // Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
 // 128-bit
+// For multi-level processing, we use 128-bit for all levels to avoid recompilation
+// Comment out the #if when running single level, use the forced line for multi-level
+/*
 #if LEVEL <= 3
 using StateType = StateType64;
 #else
 using StateType = StateType128;
 #endif
+*/
+
+// Force 128-bit for multi-level support
+using StateType = StateType128;
 
 const string COLORS[] = {
     "\033[44m", // Blue background   - type 0
@@ -211,9 +228,29 @@ inline GridConfig createGrid() {
   }
 }
 
+inline GridConfig createGrid(int level) {
+  switch (level) {
+  case 2:
+    return createLevel2Grid();
+  case 3:
+    return createLevel3Grid();
+  case 4:
+    return createLevel4Grid();
+  case 5:
+    return createLevel5Grid();
+  default:
+    return createLevel1Grid();
+  }
+}
+
 inline GridConfig &getGrid() {
   static GridConfig GRID = createGrid();
   return GRID;
+}
+
+inline void reinitializeGrid(int level) {
+  getGrid() = createGrid(level);
+  getCurrentLevel() = level;
 }
 
 #define GRID getGrid()
