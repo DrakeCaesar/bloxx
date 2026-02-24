@@ -1030,7 +1030,7 @@ int main() {
   
   for (int level = LEVEL_START; level <= LEVEL_END; level++) {
     // Open file for this level
-    string filename = "../level" + to_string(level) + "_baseline.ans";
+    string filename = "../level" + to_string(level) + "_baseline.txt";
     ofstream outFile(filename);
     if (!outFile) {
       cerr << "Failed to open " << filename << "\n";
