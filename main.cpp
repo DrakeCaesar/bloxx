@@ -321,11 +321,16 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
           if (prevType == curType)
             continue;
-          StateType next = stateSet(cur, pos, prevType);
+          StateType next = canonical(stateSet(cur, pos, prevType));
           if (parentReverse
                   .emplace(next, Transition{cur, (int8_t)pos, (int8_t)curType})
-                  .second)
+                  .second) {
             qReverse.push_back(next);
+            if (parentForward.find(next) != parentForward.end()) {
+              meetState = next;
+              found = true;
+            }
+          }
         }
       }
     }
@@ -394,12 +399,17 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
               continue;
             if (!canPlace(present, newType))
               continue;
-            StateType next = stateSet(cur, pos, newType);
+            StateType next = canonical(stateSet(cur, pos, newType));
             if (parentForward
                     .emplace(next,
                              Transition{cur, (int8_t)pos, (int8_t)newType})
-                    .second)
+                    .second) {
               qForward.push_back(next);
+              if (parentReverse.find(next) != parentReverse.end()) {
+                meetState = next;
+                found = true;
+              }
+            }
           }
         }
       }
@@ -426,26 +436,6 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
       lastForwardLayerMs = forwardLayerMs;
       forwardDepth++;
-
-      // Check for meet: any max-tower state from forward found in reverse visited map
-      for (const auto &state : maxTowerStates) {
-        if (parentReverse.find(state) != parentReverse.end()) {
-          meetState = state;
-          found = true;
-          break;
-        }
-      }
-    }
-
-    // Also check after reverse: any min-tower state from reverse found in forward visited map
-    if (!found) {
-      for (const auto &state : minTowerStates) {
-        if (parentForward.find(state) != parentForward.end()) {
-          meetState = state;
-          found = true;
-          break;
-        }
-      }
     }
   }
 
@@ -470,9 +460,22 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   cur = meetState;
   while (parentReverse.at(cur).getPos() != -1) {
-    const auto &tr = parentReverse.at(cur);
-    steps.push_back({tr.getPos(), tr.getType()});
-    cur = tr.parent;
+    StateType parent = parentReverse.at(cur).parent;
+    // canonical() may apply different symmetry transforms to cur and parent,
+    // so their indices can differ at multiple positions. Search for the step
+    // (pos, type) such that canonical(stateSet(cur, pos, type)) == parent.
+    bool foundStep = false;
+    for (int p = 0; p < g_numPos && !foundStep; p++) {
+      for (int t = 0; t <= g_maxType[p] && !foundStep; t++) {
+        if (t == stateGet(cur, p))
+          continue;
+        if (canonical(stateSet(cur, p, t)) == parent) {
+          steps.push_back({p, t});
+          foundStep = true;
+        }
+      }
+    }
+    cur = parent;
   }
 
   steps.insert(steps.begin(), stepsForward.begin(), stepsForward.end());
@@ -763,7 +766,7 @@ static SearchResult runSlidingWindow() {
        << "\n";
 
   // ── Build path reconstruction: reverse BFS ─────────────────────────────
-  StateType finalState = result.bestState;
+  StateType finalState = canonical(result.bestState);
   vector<pair<int, int>> buildPath = buildPathFromReverseBfs(finalState);
   if (buildPath.empty()) {
     cout << "\nBuild path not found by reverse BFS.\n";
@@ -789,7 +792,7 @@ static SearchResult runSlidingWindow() {
     else
       invalidSteps++;
 
-    state = stateSet(state, pos, newType);
+    state = canonical(stateSet(state, pos, newType));
 
     auto [r, c] = GRID.positions[pos];
     cout << "\nStep " << (i + 1) << ": pos " << pos << " (" << r << "," << c
