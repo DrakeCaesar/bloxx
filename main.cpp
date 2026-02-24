@@ -656,18 +656,6 @@ static SearchResult runSlidingWindow() {
   for (const auto &row : WINDOW_KERNEL_PATTERN) {
     cout << "  " << row << "\n";
   }
-  const int passOrder[] = {1, 0, 2, 3};
-  auto formatPassOrder = [&]() {
-    string order;
-    for (size_t i = 0; i < std::size(passOrder); i++) {
-      if (i > 0)
-        order += "->";
-      order += char('A' + passOrder[i]);
-    }
-    return order;
-  };
-  cout << "Chained 4-corner passes (" << formatPassOrder()
-       << "), repeating until no improvement\n\n";
 
   const char *cornerNames[] = {"top-left", "top-right", "bottom-left",
                                "bottom-right"};
@@ -693,72 +681,70 @@ static SearchResult runSlidingWindow() {
     cout << "============ Round " << roundNum
          << " (starting score: " << currentScore << ") ============\n\n";
 
-    for (int passIndex = 0; passIndex < 4; passIndex++) {
-      int corner = passOrder[passIndex];
-      vector<int> zigzag = buildZigzagPath(corner);
+    int corner = 1; // top-right
+    vector<int> zigzag = buildZigzagPath(corner);
 
-      int bestScore = currentScore;
-      StateType bestState = currentState;
-      long long explored = 0;
+    int bestScore = currentScore;
+    StateType bestState = currentState;
+    long long explored = 0;
 
-      cout << "=== Pass " << (char)('A' + corner) << ": " << cornerNames[corner]
-           << " (path length: " << zigzag.size() << ") ===\n";
+    cout << "=== Pass " << (char)('A' + corner) << ": " << cornerNames[corner]
+         << " (path length: " << zigzag.size() << ") ===\n";
 
-      auto passStart = chrono::steady_clock::now();
+    auto passStart = chrono::steady_clock::now();
 
-      vector<WindowStats> stats;
+    vector<WindowStats> stats;
 
-      for (int windowIdx = 0; windowIdx < (int)zigzag.size(); windowIdx++) {
-        vector<StateType> exploredStates;
-        long long exploredBefore = explored;
+    for (int windowIdx = 0; windowIdx < (int)zigzag.size(); windowIdx++) {
+      vector<StateType> exploredStates;
+      long long exploredBefore = explored;
 
-        int posIdx = zigzag[windowIdx];
-        auto [cr, cc] = GRID.positions[posIdx];
+      int posIdx = zigzag[windowIdx];
+      auto [cr, cc] = GRID.positions[posIdx];
 
-        auto t0 = chrono::steady_clock::now();
+      auto t0 = chrono::steady_clock::now();
 
-        exploreWindow(currentState, posIdx, exploredStates, bestScore,
-                      bestState, explored);
+      exploreWindow(currentState, posIdx, exploredStates, bestScore,
+                    bestState, explored);
 
-        auto t1 = chrono::steady_clock::now();
-        auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
+      auto t1 = chrono::steady_clock::now();
+      auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
 
-        bool improved = (bestState != currentState);
-        if (improved) {
-          currentState = bestState;
-        }
-
-        stats.push_back({posIdx, cr, cc, (int)exploredStates.size(),
-                         explored - exploredBefore, ms, improved, bestScore});
+      bool improved = (bestState != currentState);
+      if (improved) {
+        currentState = bestState;
       }
 
-      currentScore = bestScore;
-
-      auto passEnd = chrono::steady_clock::now();
-      auto passMs =
-          chrono::duration_cast<chrono::milliseconds>(passEnd - passStart)
-              .count();
-
-      // Print summary table
-      cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬──"
-              "───┬───────┐\n";
-      cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ "
-              "Imp │ Score │\n";
-      cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼────"
-              "─┼───────┤\n";
-      for (const auto &s : stats) {
-        printf("│ %3d │ (%d, %d)  │ %12d │ %14lld │ %6lldms │  %s  │ %5d │\n",
-               s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored, s.timeMs,
-               s.improved ? "Y" : "N", s.scoreAfter);
-      }
-      cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴────"
-              "─┴───────┘\n";
-      cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner]
-           << "): score " << currentScore << " (" << passMs << "ms, "
-           << explored << " states)\n\n";
-
-      result.explored += explored;
+      stats.push_back({posIdx, cr, cc, (int)exploredStates.size(),
+                       explored - exploredBefore, ms, improved, bestScore});
     }
+
+    currentScore = bestScore;
+
+    auto passEnd = chrono::steady_clock::now();
+    auto passMs =
+        chrono::duration_cast<chrono::milliseconds>(passEnd - passStart)
+            .count();
+
+    // Print summary table
+    cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬──"
+            "───┬───────┐\n";
+    cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ "
+            "Imp │ Score │\n";
+    cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼────"
+            "─┼───────┤\n";
+    for (const auto &s : stats) {
+      printf("│ %3d │ (%d, %d)  │ %12d │ %14lld │ %6lldms │  %s  │ %5d │\n",
+             s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored, s.timeMs,
+             s.improved ? "Y" : "N", s.scoreAfter);
+    }
+    cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴────"
+            "─┴───────┘\n";
+    cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner]
+         << "): score " << currentScore << " (" << passMs << "ms, "
+         << explored << " states)\n\n";
+
+    result.explored += explored;
 
     cout << "Round " << roundNum << " complete: score " << scoreAtRoundStart
          << " -> " << currentScore << "\n";
