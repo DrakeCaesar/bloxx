@@ -253,7 +253,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   parentReverse.reserve(1ull << 26); // ~64M elements
 
   const size_t kPruneThreshold = 10000;
-  const int kPruneLowDelta = 2;
+  const int kPruneLowDelta = 3;
   const int kPruneHighDelta = 9;
 
   auto countTowersLeft = [](StateType s) {
