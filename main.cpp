@@ -218,13 +218,47 @@ static vector<pair<int,int>> expandPathForEmptyBoard(const vector<pair<int,int>>
 }
 
 static void printExpandedPath(const vector<pair<int,int>>& expandedSteps) {
-  cout << "\n--- Build path (" << expandedSteps.size() << " steps) ---\n\n";
-  cout << "Start (empty board):\n";
-  printGrid(StateType(0), uint64_t(0));
-
   StateType canonState = 0;   // canonical state — for validity checks
   StateType displayState = 0; // physical state — stable orientation for display
   uint64_t placedMask = 0;    // physical positions that have been placed
+
+  auto advanceState = [&](int pos, int newType) {
+    int usedSymm = 0;
+    for (int k = 0; k < g_numSymm; k++) {
+      if (applyPerm(displayState, g_symmPerm[k]) == canonState) {
+        usedSymm = k;
+        break;
+      }
+    }
+    int inversePerm[49];
+    for (int i = 0; i < g_numPos; i++)
+      inversePerm[g_symmPerm[usedSymm][i]] = i;
+
+    int physPos = inversePerm[pos];
+    canonState = canonical(stateSet(canonState, pos, newType));
+    displayState = stateSet(displayState, physPos, newType);
+    placedMask |= (1ull << physPos);
+  };
+
+  // Pre-pass to compute total steps including trailing implicit blues.
+  for (auto [pos, newType] : expandedSteps)
+    advanceState(pos, newType);
+
+  int missingCount = 0;
+  for (int i = 0; i < g_numPos; i++) {
+    if (!((placedMask >> i) & 1))
+      missingCount++;
+  }
+  int totalSteps = (int)expandedSteps.size() + missingCount;
+
+  // Reset for actual print pass.
+  canonState = 0;
+  displayState = 0;
+  placedMask = 0;
+
+  cout << "\n--- Build path (" << totalSteps << " steps) ---\n\n";
+  cout << "Start (empty board):\n";
+  printGrid(StateType(0), uint64_t(0));
   int validSteps = 0, invalidSteps = 0;
   int stepNum = 1;
 
@@ -292,7 +326,7 @@ static void printExpandedPath(const vector<pair<int,int>>& expandedSteps) {
   }
 
   int reachedScore = scoreGrid(displayState);
-  cout << "\nBuild path: " << expandedSteps.size() << " steps, " << validSteps
+  cout << "\nBuild path: " << totalSteps << " steps, " << validSteps
        << " valid, " << invalidSteps << " invalid";
   if (invalidSteps == 0) {
     cout << " \033[32m\u2014 ALL VALID\033[0m";
