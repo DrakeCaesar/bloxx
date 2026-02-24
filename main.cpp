@@ -342,13 +342,13 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     double pctDelta =
         lastReverseLayerMs > 0.0 ? ((layerMs - lastReverseLayerMs) / lastReverseLayerMs) * 100.0 : 0.0;
     if (!headerPrinted) {
-      cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬───────┬─────────────┬──────────┐\n";
-      cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%    │ Towers L/R  │ L+R      │\n";
-      cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼───────┼─────────────┼──────────┤\n";
+      cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬─────────┬─────────────┬──────────┐\n";
+      cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%      │ Towers L/R  │ L+R      │\n";
+      cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼─────────┼─────────────┼──────────┤\n";
       headerPrinted = true;
     }
     totalReverse += layerCount;
-    printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %5.1f │ %2d / %-2d     │ %8zu │\n",
+    printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
            depth, layerCount, totalReverse, layerMs, pctDelta,
            minTowersLeft, maxTowersLeft, totalReverse + totalForward);
 
@@ -423,13 +423,13 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
               ? ((forwardLayerMs - lastForwardLayerMs) / lastForwardLayerMs) * 100.0
               : 0.0;
       if (!headerPrinted) {
-        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬───────┬─────────────┬──────────┐\n";
-        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%    │ Towers L/R  │ L+R      │\n";
-        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼───────┼─────────────┼──────────┤\n";
+        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬─────────┬─────────────┬──────────┐\n";
+        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%      │ Towers L/R  │ L+R      │\n";
+        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼─────────┼─────────────┼──────────┤\n";
         headerPrinted = true;
       }
       totalForward += forwardLayerCount;
-      printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %5.1f │ %2d / %-2d     │ %8zu │\n",
+      printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
              forwardDepth, forwardLayerCount, totalForward, forwardLayerMs,
              forwardPctDelta, minForwardTowersLeft, maxForwardTowersLeft,
              totalReverse + totalForward);
@@ -440,7 +440,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   }
 
   if (headerPrinted)
-    cout << "└──────┴──────────┴─────────────┴─────────────┴──────────┴──────┴──────────────┴──────────┘\n";
+    cout << "└──────┴──────────┴─────────────┴─────────────┴──────────┴─────────┴─────────────┴──────────┘\n";
   
 
   if (!found)
