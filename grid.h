@@ -45,76 +45,16 @@ const int LEVEL_START = 1; // First level to process
 const int LEVEL_END = 5;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
-inline int &getCurrentLevel() {
+inline int& getCurrentLevel() {
   static int currentLevel = LEVEL;
   return currentLevel;
-}
-inline int &getCurrentUnlockedType() {
-  static int currentUnlockedType = MAX_UNLOCKED_TYPE;
-  return currentUnlockedType;
 }
 // Sliding window parameters
 const int MAX_DEPTH = 10; // Maximum BFS depth per window
 const int SCAFFOLD_DEPTH =
     10; // Maximum BFS depth for scaffold search during path reconstruction
 
-// Pattern selection per (level, unlocked type)
-// Table indices: level 1-5, unlocked type 1-4
-struct PatternConfig {
-  int kernelIndex;
-  int zigzagPattern;     // 0 = diagonal zigzag, 1 = snake (boustrophedon)
-  int zigzagStartCorner; // 0 = top-left, 1 = top-right, 2 = bottom-left,
-                         // 3 = bottom-right
-};
-
-inline bool &getPatternOverrideEnabled() {
-  static bool enabled = false;
-  return enabled;
-}
-inline PatternConfig &getPatternOverride() {
-  static PatternConfig overrideCfg{2, 0, 1};
-  return overrideCfg;
-}
-inline void setPatternOverride(const PatternConfig &cfg) {
-  getPatternOverride() = cfg;
-  getPatternOverrideEnabled() = true;
-}
-inline void clearPatternOverride() { getPatternOverrideEnabled() = false; }
-
-inline const PatternConfig &getPatternConfig(int level, int unlockedType) {
-  if (getPatternOverrideEnabled()) {
-    return getPatternOverride();
-  }
-  static const PatternConfig table[5][4] = {
-      // Level 1
-      {{2, 0, 1}, {2, 0, 1}, {2, 0, 1}, {2, 0, 1}},
-      // Level 2
-      {{2, 0, 1}, {2, 0, 1}, {2, 0, 1}, {2, 0, 1}},
-      // Level 3
-      {{2, 0, 1}, {2, 0, 1}, {2, 0, 1}, {2, 0, 1}},
-      // Level 4
-      {{2, 0, 1}, {2, 0, 1}, {2, 0, 1}, {2, 0, 1}},
-      // Level 5
-      {{2, 0, 1}, {2, 0, 1}, {2, 0, 1}, {2, 0, 1}},
-  };
-
-  int levelIdx = max(1, min(5, level)) - 1;
-  int unlockedIdx = max(1, min(4, unlockedType)) - 1;
-  return table[levelIdx][unlockedIdx];
-}
-
-inline int getKernelIndex() {
-  return getPatternConfig(getCurrentLevel(), getCurrentUnlockedType())
-      .kernelIndex;
-}
-inline int getZigzagPattern() {
-  return getPatternConfig(getCurrentLevel(), getCurrentUnlockedType())
-      .zigzagPattern;
-}
-inline int getZigzagStartCorner() {
-  return getPatternConfig(getCurrentLevel(), getCurrentUnlockedType())
-      .zigzagStartCorner;
-}
+const int KERNEL_INDEX = 2; // Select which kernel to use
 
 // Kernel patterns: '.' = include in window, ' ' = exclude
 // Pattern is centered on the window position
@@ -126,17 +66,24 @@ const vector<vector<string>> KERNEL_PATTERNS = {
     // 1: 3x3 square (9 positions)
     {"...", "...", "..."},
     // 2: Diamond / plus shape (13 positions)
-    {"  .  ", " ... ", ".....", " ... ", "  .  "}};
+    {"  .  ", " ... ", ".....", " ... ", "  .  "},
+    // 3: 5x5 square (25 positiogitns)
+    {".....", ".....", ".....", ".....", "....."},
+    // 4: Plus shape (9 positions)
+    {"  .  ", "  .  ", ".....", "  .  ", "  .  "},
+    // 5: L-shape (5 positions)
+    {"...", ". ", ". "},
+};
 inline const vector<string> &getWindowKernelPattern() {
-  return KERNEL_PATTERNS[getKernelIndex()];
+  static const vector<string> pattern = KERNEL_PATTERNS[KERNEL_INDEX];
+  return pattern;
 }
 #define WINDOW_KERNEL_PATTERN getWindowKernelPattern()
 
 // Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
 // 128-bit
-// For multi-level processing, we use 128-bit for all levels to avoid
-// recompilation Comment out the #if when running single level, use the forced
-// line for multi-level
+// For multi-level processing, we use 128-bit for all levels to avoid recompilation
+// Comment out the #if when running single level, use the forced line for multi-level
 /*
 #if LEVEL <= 3
 using StateType = StateType64;
@@ -158,10 +105,8 @@ const string COLORS[] = {
 const string COLOR_NAMES[] = {"Blue", "Red", "Green", "Yellow", "White"};
 const string RESET = "\033[0m";
 const string BLACK_TEXT = "\033[30m"; // Black text for number
-const string EMPTY_BG =
-    "\033[100m"; // Grey background - empty/unplaced position
-const string EMPTY_FG =
-    "\033[90m"; // Grey foreground - empty position (grey bg + grey fg)
+const string EMPTY_BG = "\033[100m";  // Grey background - empty/unplaced position
+const string EMPTY_FG = "\033[90m";  // Grey foreground - empty position (grey bg + grey fg)
 
 // ANSI foreground colors for half-block separators (3x codes)
 const string FG_COLORS[] = {
@@ -172,12 +117,8 @@ const string FG_COLORS[] = {
     "\033[37m"  // White foreground  - type 4
 };
 
-inline const string &bgColor(int t, bool placed) {
-  return placed ? COLORS[t] : EMPTY_BG;
-}
-inline const string &fgColor(int t, bool placed) {
-  return placed ? FG_COLORS[t] : EMPTY_FG;
-}
+inline const string& bgColor(int t, bool placed) { return placed ? COLORS[t] : EMPTY_BG; }
+inline const string& fgColor(int t, bool placed) { return placed ? FG_COLORS[t] : EMPTY_FG; }
 
 // ══════════════════════════════════════════════════════════════════════════
 // Grid Configuration
@@ -379,8 +320,8 @@ inline void printGrid(StateType s) {
   }
 }
 
-// printGrid with placed mask: bit i=1 means position i has been explicitly
-// built. Unplaced positions (bit=0, type=0) are rendered as dark empty cells.
+// printGrid with placed mask: bit i=1 means position i has been explicitly built.
+// Unplaced positions (bit=0, type=0) are rendered as dark empty cells.
 inline void printGrid(StateType s, uint64_t placedMask) {
   for (int r = 0; r < GRID.rows; r++) {
     pair<int, int> firstCoord = {r, 0};
