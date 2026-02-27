@@ -7,13 +7,21 @@
 #include <robin_hood.h>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "grid.h"
+#include "src/search_base.h"
+#include "src/search_bfs.h"
+#include "src/search_dfs.h"
+#include "src/search_sliding_window.h"
 
 using namespace std;
 
 // Global file stream for baseline output (only used for reverse BFS section)
-static ofstream* g_baselineFile = nullptr;
-static streambuf* g_originalCoutBuf = nullptr;
+ofstream *g_baselineFile = nullptr;
+streambuf *g_originalCoutBuf = nullptr;
 
 // Hash specialization for uint128_simd (must be after including grid.h)
 namespace robin_hood {
@@ -175,11 +183,12 @@ static int scoreGrid(StateType state);
 // Tracks a physical (non-canonical) state so neighbor lookups against
 // GRID.neighbors[] remain consistent with position indices.
 
-static vector<pair<int,int>> expandPathForEmptyBoard(const vector<pair<int,int>>& steps) {
-  vector<pair<int,int>> out;
+static vector<pair<int, int>>
+expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
+  vector<pair<int, int>> out;
   out.reserve(steps.size() * 2);
-  uint64_t placed = 0;   // bit i = position i has been explicitly placed
-  StateType phys = 0;    // canonical state — mirrors what printExpandedPath tracks
+  uint64_t placed = 0; // bit i = position i has been explicitly placed
+  StateType phys = 0; // canonical state — mirrors what printExpandedPath tracks
 
   for (auto [pos, newType] : steps) {
     // For each required neighbor type req in 0..newType-1,
@@ -193,7 +202,7 @@ static vector<pair<int,int>> expandPathForEmptyBoard(const vector<pair<int,int>>
         int nbType = stateGet(phys, nb);
         if (nbType == req) {
           if ((placed >> nb) & 1) {
-            satisfied = true;  // already explicitly placed with correct type
+            satisfied = true; // already explicitly placed with correct type
             break;
           } else if (req == 0) {
             // Implicit blue (unplaced, type 0) — can satisfy req=0 once placed
@@ -217,7 +226,7 @@ static vector<pair<int,int>> expandPathForEmptyBoard(const vector<pair<int,int>>
   return out;
 }
 
-static void printExpandedPath(const vector<pair<int,int>>& expandedSteps) {
+static void printExpandedPath(const vector<pair<int, int>> &expandedSteps) {
   StateType canonState = 0;   // canonical state — for validity checks
   StateType displayState = 0; // physical state — stable orientation for display
   uint64_t placedMask = 0;    // physical positions that have been placed
@@ -285,7 +294,10 @@ static void printExpandedPath(const vector<pair<int,int>>& expandedSteps) {
     // Validity check in canonical space
     uint32_t present = neighborPresent(canonState, pos);
     bool valid = canPlace(present, newType);
-    if (valid) validSteps++; else invalidSteps++;
+    if (valid)
+      validSteps++;
+    else
+      invalidSteps++;
 
     // Update canonical state
     canonState = canonical(stateSet(canonState, pos, newType));
@@ -294,16 +306,19 @@ static void printExpandedPath(const vector<pair<int,int>>& expandedSteps) {
     placedMask |= (1ull << physPos);
 
     auto [r, c] = GRID.positions[physPos];
-    cout << "\nStep " << stepNum << ": pos " << physPos << " (" << r << "," << c << ")  ";
+    cout << "\nStep " << stepNum << ": pos " << physPos << " (" << r << "," << c
+         << ")  ";
     if (oldType == -1) {
-      cout << "empty -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType]
-           << RESET << " (" << newType << ")";
+      cout << "empty -> " << COLORS[newType] << BLACK_TEXT
+           << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
     } else {
       cout << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET
            << " (" << oldType << ") -> " << COLORS[newType] << BLACK_TEXT
            << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
     }
-    cout << (valid ? "  \033[32m\u2713\033[0m" : "  \033[31m\u2717 INVALID\033[0m") << "\n";
+    cout << (valid ? "  \033[32m\u2713\033[0m"
+                   : "  \033[31m\u2717 INVALID\033[0m")
+         << "\n";
     printGrid(displayState, placedMask);
     stepNum++;
   }
@@ -315,9 +330,10 @@ static void printExpandedPath(const vector<pair<int,int>>& expandedSteps) {
       placedMask |= (1ull << i);
       // displayState already has 0 (blue) at this position
       auto [r, c] = GRID.positions[i];
-      cout << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c << ")  ";
-      cout << "empty -> " << COLORS[0] << BLACK_TEXT << COLOR_NAMES[0]
-           << RESET << " (0)";
+      cout << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c
+           << ")  ";
+      cout << "empty -> " << COLORS[0] << BLACK_TEXT << COLOR_NAMES[0] << RESET
+           << " (0)";
       cout << "  \033[32m\u2713\033[0m" << "\n";
       printGrid(displayState, placedMask);
       stepNum++;
@@ -450,15 +466,13 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       // Fallback: keep the single best node by tower count.
       auto bestIt = scored.begin();
       if (keepLowest) {
-        bestIt = min_element(scored.begin(), scored.end(),
-                             [](const auto &a, const auto &b) {
-                               return a.second < b.second;
-                             });
+        bestIt = min_element(
+            scored.begin(), scored.end(),
+            [](const auto &a, const auto &b) { return a.second < b.second; });
       } else {
-        bestIt = max_element(scored.begin(), scored.end(),
-                             [](const auto &a, const auto &b) {
-                               return a.second < b.second;
-                             });
+        bestIt = max_element(
+            scored.begin(), scored.end(),
+            [](const auto &a, const auto &b) { return a.second < b.second; });
       }
       keepStates.insert(bestIt->first);
     }
@@ -506,8 +520,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   size_t forwardDepth = 0;
   bool found = false;
   StateType meetState = 0;
-  size_t totalReverse = 0;  // For display only
-  size_t totalForward = 0;  // For display only
+  size_t totalReverse = 0; // For display only
+  size_t totalForward = 0; // For display only
   bool headerPrinted = false;
   vector<StateType> minTowerStates;
 
@@ -524,8 +538,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       else
         switchToForward = (lastReverseLayerMs >= (5.0 * lastForwardLayerMs));
     }
-    bool shouldExpandReverse = !bothStarted ? (depth <= forwardDepth)
-                                            : !switchToForward;
+    bool shouldExpandReverse =
+        !bothStarted ? (depth <= forwardDepth) : !switchToForward;
 
     if (shouldExpandReverse) {
       // Expand reverse
@@ -536,78 +550,85 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       bool anyProcessed = false;
       minTowerStates.clear();
 
-    for (size_t i = 0; i < layerCount; i++) {
-      StateType cur = qReverse.front();
-      qReverse.pop_front();
-      int towersLeft = 0;
-      for (int pos = 0; pos < g_numPos; pos++) {
-        if (stateGet(cur, pos) != 0)
-          towersLeft++;
-      }
-      if (!anyProcessed) {
-        minTowersLeft = towersLeft;
-        maxTowersLeft = towersLeft;
-        anyProcessed = true;
-        minTowerStates.clear();
-        minTowerStates.push_back(cur);
-      } else {
-        if (towersLeft < minTowersLeft) {
+      for (size_t i = 0; i < layerCount; i++) {
+        StateType cur = qReverse.front();
+        qReverse.pop_front();
+        int towersLeft = 0;
+        for (int pos = 0; pos < g_numPos; pos++) {
+          if (stateGet(cur, pos) != 0)
+            towersLeft++;
+        }
+        if (!anyProcessed) {
           minTowersLeft = towersLeft;
+          maxTowersLeft = towersLeft;
+          anyProcessed = true;
           minTowerStates.clear();
           minTowerStates.push_back(cur);
-        } else if (towersLeft == minTowersLeft) {
-          minTowerStates.push_back(cur);
+        } else {
+          if (towersLeft < minTowersLeft) {
+            minTowersLeft = towersLeft;
+            minTowerStates.clear();
+            minTowerStates.push_back(cur);
+          } else if (towersLeft == minTowersLeft) {
+            minTowerStates.push_back(cur);
+          }
+          minTowersLeft = min(minTowersLeft, towersLeft);
+          maxTowersLeft = max(maxTowersLeft, towersLeft);
         }
-        minTowersLeft = min(minTowersLeft, towersLeft);
-        maxTowersLeft = max(maxTowersLeft, towersLeft);
-      }
-      if (cur == 0) {
-        qReverse.clear();
-        break;
-      }
+        if (cur == 0) {
+          qReverse.clear();
+          break;
+        }
 
-      for (int pos = 0; pos < g_numPos; pos++) {
-        int curType = stateGet(cur, pos);
-        if (curType == 0)
-          continue; // Nothing to remove at this position
+        for (int pos = 0; pos < g_numPos; pos++) {
+          int curType = stateGet(cur, pos);
+          if (curType == 0)
+            continue; // Nothing to remove at this position
 
-        uint32_t present = neighborPresent(cur, pos);
-        if (!canPlace(present, curType))
-          continue; // This tower could not have been placed here
+          uint32_t present = neighborPresent(cur, pos);
+          if (!canPlace(present, curType))
+            continue; // This tower could not have been placed here
 
-        for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
-          if (prevType == curType)
-            continue;
-          StateType next = canonical(stateSet(cur, pos, prevType));
-          if (parentReverse
-                  .emplace(next, Transition{cur, (int8_t)pos, (int8_t)curType})
-                  .second) {
-            qReverse.push_back(next);
-            if (parentForward.find(next) != parentForward.end()) {
-              meetState = next;
-              found = true;
+          for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
+            if (prevType == curType)
+              continue;
+            StateType next = canonical(stateSet(cur, pos, prevType));
+            if (parentReverse
+                    .emplace(next,
+                             Transition{cur, (int8_t)pos, (int8_t)curType})
+                    .second) {
+              qReverse.push_back(next);
+              if (parentForward.find(next) != parentForward.end()) {
+                meetState = next;
+                found = true;
+              }
             }
           }
         }
       }
-    }
 
-    auto layerEnd = chrono::steady_clock::now();
-    double layerMs =
-        chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
-            .count();
-    double pctDelta =
-        lastReverseLayerMs > 0.0 ? ((layerMs - lastReverseLayerMs) / lastReverseLayerMs) * 100.0 : 0.0;
-    if (!headerPrinted) {
-      cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬─────────┬─────────────┬──────────┐\n";
-      cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%      │ Towers L/R  │ L+R      │\n";
-      cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼─────────┼─────────────┼──────────┤\n";
-      headerPrinted = true;
-    }
-    totalReverse += layerCount;
-    printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
-           depth, layerCount, totalReverse, layerMs, pctDelta,
-           minTowersLeft, maxTowersLeft, totalReverse + totalForward);
+      auto layerEnd = chrono::steady_clock::now();
+      double layerMs =
+          chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
+              .count();
+      double pctDelta =
+          lastReverseLayerMs > 0.0
+              ? ((layerMs - lastReverseLayerMs) / lastReverseLayerMs) * 100.0
+              : 0.0;
+      if (!headerPrinted) {
+        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬────"
+                "─────┬─────────────┬──────────┐\n";
+        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆% "
+                "     │ Towers L/R  │ L+R      │\n";
+        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼────"
+                "─────┼─────────────┼──────────┤\n";
+        headerPrinted = true;
+      }
+      totalReverse += layerCount;
+      printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ "
+             "%8zu │\n",
+             depth, layerCount, totalReverse, layerMs, pctDelta, minTowersLeft,
+             maxTowersLeft, totalReverse + totalForward);
 
       lastReverseLayerMs = layerMs;
       if (!found)
@@ -621,7 +642,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       int maxForwardTowersLeft = 0;
       bool anyForwardProcessed = false;
       vector<StateType> maxTowerStates;
-      
+
       for (size_t i = 0; i < forwardLayerCount; i++) {
         StateType cur = qForward.front();
         qForward.pop_front();
@@ -672,23 +693,28 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
           }
         }
       }
-      
+
       auto forwardLayerEnd = chrono::steady_clock::now();
       double forwardLayerMs = chrono::duration_cast<chrono::milliseconds>(
                                   forwardLayerEnd - forwardLayerStart)
                                   .count();
       double forwardPctDelta =
           lastForwardLayerMs > 0.0
-              ? ((forwardLayerMs - lastForwardLayerMs) / lastForwardLayerMs) * 100.0
+              ? ((forwardLayerMs - lastForwardLayerMs) / lastForwardLayerMs) *
+                    100.0
               : 0.0;
       if (!headerPrinted) {
-        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬─────────┬─────────────┬──────────┐\n";
-        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%      │ Towers L/R  │ L+R      │\n";
-        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼─────────┼─────────────┼──────────┤\n";
+        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬────"
+                "─────┬─────────────┬──────────┐\n";
+        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆% "
+                "     │ Towers L/R  │ L+R      │\n";
+        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼────"
+                "─────┼─────────────┼──────────┤\n";
         headerPrinted = true;
       }
       totalForward += forwardLayerCount;
-      printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ %8zu │\n",
+      printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ "
+             "%8zu │\n",
              forwardDepth, forwardLayerCount, totalForward, forwardLayerMs,
              forwardPctDelta, minForwardTowersLeft, maxForwardTowersLeft,
              totalReverse + totalForward);
@@ -701,13 +727,14 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   }
 
   if (headerPrinted)
-    cout << "└──────┴──────────┴─────────────┴─────────────┴──────────┴─────────┴─────────────┴──────────┘\n";
-  
+    cout << "└──────┴──────────┴─────────────┴─────────────┴──────────┴────────"
+            "─┴─────────────┴──────────┘\n";
 
   if (!found)
     return {};
 
-  // Redirect output to file if baseline mode is active (after BFS table completes)
+  // Redirect output to file if baseline mode is active (after BFS table
+  // completes)
   if (g_baselineFile && g_baselineFile->is_open()) {
     g_originalCoutBuf = cout.rdbuf();
     cout.rdbuf(g_baselineFile->rdbuf());
@@ -959,8 +986,8 @@ static SearchResult runSlidingWindow() {
 
       auto t0 = chrono::steady_clock::now();
 
-      exploreWindow(currentState, posIdx, exploredStates, bestScore,
-                    bestState, explored);
+      exploreWindow(currentState, posIdx, exploredStates, bestScore, bestState,
+                    explored);
 
       auto t1 = chrono::steady_clock::now();
       auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
@@ -996,8 +1023,8 @@ static SearchResult runSlidingWindow() {
     cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴────"
             "─┴───────┘\n";
     cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner]
-         << "): score " << currentScore << " (" << passMs << "ms, "
-         << explored << " states)\n\n";
+         << "): score " << currentScore << " (" << passMs << "ms, " << explored
+         << " states)\n\n";
 
     result.explored += explored;
 
@@ -1016,8 +1043,8 @@ static SearchResult runSlidingWindow() {
   result.bestScore = currentScore;
   result.bestState = currentState;
 
-  cout << "\nFinal score after " << roundNum << " round(s): " << result.bestScore
-       << "\n";
+  cout << "\nFinal score after " << roundNum
+       << " round(s): " << result.bestScore << "\n";
 
   // ── Build path reconstruction: reverse BFS ─────────────────────────────
   StateType finalState = canonical(result.bestState);
@@ -1033,13 +1060,13 @@ static SearchResult runSlidingWindow() {
 
   cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0;
-  
+
   // Restore cout if it was redirected
   if (g_originalCoutBuf) {
     cout.rdbuf(g_originalCoutBuf);
     g_originalCoutBuf = nullptr;
   }
-  
+
   return result;
 }
 
@@ -1235,40 +1262,50 @@ void runSingleLevel() {
 }
 
 int main() {
+#ifdef _WIN32
+  // Set console to UTF-8 mode for proper Unicode display on Windows
+  SetConsoleOutputCP(CP_UTF8);
+  setvbuf(stdout, nullptr, _IOFBF, 1000);
+#endif
+
   // Process configured level range and all unlocked tower types
   cout << "═══════════════════════════════════════════════════════════════\n";
   cout << "       Tower Blox Deluxe Solver - Multi-Level Baseline\n";
   cout << "═══════════════════════════════════════════════════════════════\n\n";
-  
+
   for (int level = LEVEL_START; level <= LEVEL_END; level++) {
-    for (int unlockedType = UNLOCKED_TYPE_START; unlockedType <= UNLOCKED_TYPE_END; unlockedType++) {
+    for (int unlockedType = UNLOCKED_TYPE_START;
+         unlockedType <= UNLOCKED_TYPE_END; unlockedType++) {
       // Generate filename with both level and unlocked type
-      string filename = "../level" + to_string(level) + "_type" + to_string(unlockedType) + "_baseline.txt";
+      string filename = "../level" + to_string(level) + "_type" +
+                        to_string(unlockedType) + "_baseline.txt";
       ofstream outFile(filename);
       if (!outFile) {
         cerr << "Failed to open " << filename << "\n";
         continue;
       }
-      
+
       // Set global file pointer (will be used during reverse BFS)
       g_baselineFile = &outFile;
-      
+
       // Reinitialize for this level and tower type
       reinitializeGrid(level);
       GRID.computeMaxTypes(unlockedType);
-      
-      // Run the solver (console output for sliding window, file output for reverse BFS)
+
+      // Run the solver (console output for sliding window, file output for
+      // reverse BFS)
       runSingleLevel();
-      
+
       // Clear global file pointer
       g_baselineFile = nullptr;
       outFile.close();
-      
+
       // Print progress to console
-      cout << "✓ Level " << level << " (unlocked: 0-" << unlockedType << ") complete → " << filename << "\n";
+      cout << "✓ Level " << level << " (unlocked: 0-" << unlockedType
+           << ") complete → " << filename << "\n";
     }
   }
-  
+
   cout << "\n═══════════════════════════════════════════════════════════════\n";
   cout << "All 25 baseline files generated successfully!\n";
   cout << "═══════════════════════════════════════════════════════════════\n";
