@@ -12,10 +12,6 @@
 #endif
 
 #include "grid.h"
-#include "src/search_base.h"
-#include "src/search_bfs.h"
-#include "src/search_dfs.h"
-#include "src/search_sliding_window.h"
 
 using namespace std;
 
@@ -1279,7 +1275,7 @@ int main() {
       // Generate filename with both level and unlocked type
       string filename = "../level" + to_string(level) + "_type" +
                         to_string(unlockedType) + "_baseline.txt";
-      ofstream outFile(filename);
+      ofstream outFile(filename, std::ios::binary);
       if (!outFile) {
         cerr << "Failed to open " << filename << "\n";
         continue;

@@ -23,6 +23,8 @@ using StateType64 = uint64_t;
 using StateType128 = uint128_simd;
 
 // Hash specialization for __uint128_t (needed for robin_hood and std maps)
+// Only define if not already provided by standard library (GCC 13+ has it)
+#if !defined(__GLIBCXX__) || (__GLIBCXX__ < 20230528)
 namespace std {
 template <> struct hash<__uint128_t> {
   size_t operator()(__uint128_t x) const noexcept {
@@ -33,6 +35,7 @@ template <> struct hash<__uint128_t> {
   }
 };
 } // namespace std
+#endif
 
 // ANSI color codes
 
