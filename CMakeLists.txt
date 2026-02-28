@@ -28,6 +28,6 @@ FetchContent_Declare(unordered_dense
 )
 FetchContent_MakeAvailable(unordered_dense)
 
-add_executable(tower_solver main.cpp)
+add_executable(tower_solver src/driver.cpp src/search.cpp)
 target_link_libraries(tower_solver PRIVATE robin_hood::robin_hood)
 target_include_directories(tower_solver PRIVATE ${unordered_dense_SOURCE_DIR}/include)

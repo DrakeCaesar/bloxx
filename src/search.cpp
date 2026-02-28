@@ -1,17 +1,17 @@
 #include <ankerl/unordered_dense.h>
 #include <chrono>
 #include <deque>
-#include <fstream>
 #include <functional>
 #include <iostream>
 #include <robin_hood.h>
 #include <vector>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
-#include "grid.h"
+#include "config.h"
+#include "display.h"
+#include "grid_config.h"
+#include "search.h"
+#include "state_utils.h"
+#include "transition.h"
 
 using namespace std;
 
@@ -19,7 +19,7 @@ using namespace std;
 ofstream *g_baselineFile = nullptr;
 streambuf *g_originalCoutBuf = nullptr;
 
-// Hash specialization for uint128_simd (must be after including grid.h)
+// Hash specialization for uint128_simd (must be after including config.h)
 namespace robin_hood {
 template <> struct hash<uint128_simd> {
   size_t operator()(const uint128_simd &x) const noexcept {
@@ -30,7 +30,7 @@ template <> struct hash<uint128_simd> {
 };
 } // namespace robin_hood
 
-// ── Hot-path lookup tables ─────────────────────────────────────────────────
+// ── Hot-path lookup tables ──────────────────────────────────────────────────
 // Flat fixed-size arrays eliminate vector pointer indirection in the inner
 // loop. Max grid 7×7 = 49 positions, max 4 orthogonal neighbors each. Neighbor
 // bit-shifts are precomputed (neighborIndex * 3) to avoid multiplies in
@@ -44,7 +44,7 @@ static int g_neighborCount[49];
 static int g_maxType[49];
 static const uint32_t g_requiredMask[5] = {0, 1, 3, 7, 15}; // (1<<type)-1
 
-// ── Symmetry ───────────────────────────────────────────────────────────────
+// ── Symmetry ────────────────────────────────────────────────────────────────
 // Auto-detects valid symmetries by trying all 8 dihedral transforms against
 // actual grid positions. Keeps only those where every position maps to another
 // valid position. Identity is always first (index 0).
@@ -131,18 +131,7 @@ static void buildLookupTables() {
   }
 }
 
-// ── State packing ──────────────────────────────────────────────────────────
-// Each position stores a value 0-4 (fits in 3 bits).
-// Up to 21 positions × 3 bits = 63 bits → fits in uint64_t.
-
-inline StateType stateSet(StateType s, int pos, int val) {
-  s &= ~(StateType(7) << (pos * 3));
-  s |= StateType(val) << (pos * 3);
-  return s;
-}
-inline int stateGet(StateType s, int pos) { return (s >> (pos * 3)) & 7; }
-
-// ── Placement rule ─────────────────────────────────────────────────────────
+// ── Placement rule ───────────────────────────────────────────────────────────
 // Tower of type T at pos requires one neighbor of each type 0..T-1.
 // neighborPresent() computes the bitmask once per (state, pos); canPlace()
 // then checks it cheaply for each candidate type.
@@ -162,9 +151,16 @@ inline bool canPlace(uint32_t present, int type) {
   return (present & g_requiredMask[type]) == g_requiredMask[type];
 }
 
-// ── Path reconstruction ────────────────────────────────────────────────────
-// Forward declaration (defined later with sliding window code)
-static int scoreGrid(StateType state);
+// ── Path reconstruction helpers ──────────────────────────────────────────────
+static int scoreGrid(StateType state) {
+  int score = 0;
+  for (int i = 0; i < g_numPos; i++) {
+    int type = stateGet(state, i);
+    score += type;
+  }
+  return score;
+}
+
 // expandPathForEmptyBoard: converts a path from the solver's "all zeros = blue"
 // model to a path that starts from a truly empty board.
 //
@@ -178,13 +174,12 @@ static int scoreGrid(StateType state);
 //
 // Tracks a physical (non-canonical) state so neighbor lookups against
 // GRID.neighbors[] remain consistent with position indices.
-
 static vector<pair<int, int>>
 expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
   vector<pair<int, int>> out;
   out.reserve(steps.size() * 2);
   uint64_t placed = 0; // bit i = position i has been explicitly placed
-  StateType phys = 0; // canonical state — mirrors what printExpandedPath tracks
+  StateType phys = 0;  // canonical state — mirrors what printExpandedPath tracks
 
   for (auto [pos, newType] : steps) {
     // For each required neighbor type req in 0..newType-1,
@@ -330,7 +325,8 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps) {
            << ")  ";
       cout << "empty -> " << COLORS[0] << BLACK_TEXT << COLOR_NAMES[0] << RESET
            << " (0)";
-      cout << "  \033[32m\u2713\033[0m" << "\n";
+      cout << "  \033[32m\u2713\033[0m"
+           << "\n";
       printGrid(displayState, placedMask);
       stepNum++;
       validSteps++;
@@ -612,12 +608,12 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
               ? ((layerMs - lastReverseLayerMs) / lastReverseLayerMs) * 100.0
               : 0.0;
       if (!headerPrinted) {
-        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬────"
-                "─────┬─────────────┬──────────┐\n";
-        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆% "
-                "     │ Towers L/R  │ L+R      │\n";
-        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼────"
-                "─────┼─────────────┼──────────┤\n";
+        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬────────"
+                "─┬─────────────┬──────────┐\n";
+        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%    "
+                " │ Towers L/R  │ L+R      │\n";
+        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼────────"
+                "─┼─────────────┼──────────┤\n";
         headerPrinted = true;
       }
       totalReverse += layerCount;
@@ -691,21 +687,22 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       }
 
       auto forwardLayerEnd = chrono::steady_clock::now();
-      double forwardLayerMs = chrono::duration_cast<chrono::milliseconds>(
-                                  forwardLayerEnd - forwardLayerStart)
-                                  .count();
+      double forwardLayerMs =
+          chrono::duration_cast<chrono::milliseconds>(forwardLayerEnd -
+                                                      forwardLayerStart)
+              .count();
       double forwardPctDelta =
           lastForwardLayerMs > 0.0
               ? ((forwardLayerMs - lastForwardLayerMs) / lastForwardLayerMs) *
                     100.0
               : 0.0;
       if (!headerPrinted) {
-        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬────"
-                "─────┬─────────────┬──────────┐\n";
-        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆% "
-                "     │ Towers L/R  │ L+R      │\n";
-        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼────"
-                "─────┼─────────────┼──────────┤\n";
+        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬────────"
+                "─┬─────────────┬──────────┐\n";
+        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%    "
+                " │ Towers L/R  │ L+R      │\n";
+        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼────────"
+                "─┬─────────────┬──────────┤\n";
         headerPrinted = true;
       }
       totalForward += forwardLayerCount;
@@ -772,7 +769,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   return steps;
 }
 
-// ── Sliding Window Optimization ────────────────────────────────────────────
+// ── Sliding Window Optimization ─────────────────────────────────────────────-
 // Processes grid using 3x3 windows with stride=1 along a JPEG-like zigzag path
 // Each window respects constraints from the entire grid (in+out of window)
 
@@ -824,15 +821,6 @@ static vector<int> buildZigzagPath(int corner = 0) {
     }
   }
   return path;
-}
-
-static int scoreGrid(StateType state) {
-  int score = 0;
-  for (int i = 0; i < g_numPos; i++) {
-    int type = stateGet(state, i);
-    score += type;
-  }
-  return score;
 }
 
 // BFS within a window: exhaustively explore ALL reachable states
@@ -1005,19 +993,19 @@ static SearchResult runSlidingWindow() {
             .count();
 
     // Print summary table
-    cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬──"
-            "───┬───────┐\n";
-    cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ "
-            "Imp │ Score │\n";
-    cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼────"
-            "─┼───────┤\n";
+    cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬──────┬───────"
+            "┐\n";
+    cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ Imp  │ "
+            "Score │\n";
+    cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼──────┼──────"
+            "─┤\n";
     for (const auto &s : stats) {
       printf("│ %3d │ (%d, %d)  │ %12d │ %14lld │ %6lldms │  %s  │ %5d │\n",
              s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored, s.timeMs,
              s.improved ? "Y" : "N", s.scoreAfter);
     }
-    cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴────"
-            "─┴───────┘\n";
+    cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴──────┴──────"
+            "─┘\n";
     cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner]
          << "): score " << currentScore << " (" << passMs << "ms, " << explored
          << " states)\n\n";
@@ -1133,7 +1121,7 @@ static SearchResult runIDDFS() {
   return result;
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────
+// ── Public entrypoint for a single level/unlocked-type configuration ────────
 
 void runSingleLevel() {
   cout << "Tower Blox Deluxe Solver\n";
@@ -1257,54 +1245,3 @@ void runSingleLevel() {
   }
 }
 
-int main() {
-#ifdef _WIN32
-  // Set console to UTF-8 mode for proper Unicode display on Windows
-  SetConsoleOutputCP(CP_UTF8);
-  setvbuf(stdout, nullptr, _IOFBF, 1000);
-#endif
-
-  // Process configured level range and all unlocked tower types
-  cout << "═══════════════════════════════════════════════════════════════\n";
-  cout << "       Tower Blox Deluxe Solver - Multi-Level Baseline\n";
-  cout << "═══════════════════════════════════════════════════════════════\n\n";
-
-  for (int level = LEVEL_START; level <= LEVEL_END; level++) {
-    for (int unlockedType = UNLOCKED_TYPE_START;
-         unlockedType <= UNLOCKED_TYPE_END; unlockedType++) {
-      // Generate filename with both level and unlocked type
-      string filename = "../level" + to_string(level) + "_type" +
-                        to_string(unlockedType) + "_baseline.txt";
-      ofstream outFile(filename, std::ios::binary);
-      if (!outFile) {
-        cerr << "Failed to open " << filename << "\n";
-        continue;
-      }
-
-      // Set global file pointer (will be used during reverse BFS)
-      g_baselineFile = &outFile;
-
-      // Reinitialize for this level and tower type
-      reinitializeGrid(level);
-      GRID.computeMaxTypes(unlockedType);
-
-      // Run the solver (console output for sliding window, file output for
-      // reverse BFS)
-      runSingleLevel();
-
-      // Clear global file pointer
-      g_baselineFile = nullptr;
-      outFile.close();
-
-      // Print progress to console
-      cout << "✓ Level " << level << " (unlocked: 0-" << unlockedType
-           << ") complete → " << filename << "\n";
-    }
-  }
-
-  cout << "\n═══════════════════════════════════════════════════════════════\n";
-  cout << "All 25 baseline files generated successfully!\n";
-  cout << "═══════════════════════════════════════════════════════════════\n";
-
-  return 0;
-}
