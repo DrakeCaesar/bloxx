@@ -141,7 +141,7 @@ inline uint32_t neighborPresent(StateType state, int pos) {
   const int *shifts = g_neighborShifts[pos];
   int count = g_neighborCount[pos];
   for (int i = 0; i < count; i++)
-    present |= 1u << ((state >> shifts[i]) & 7);
+    present |= 1u << static_cast<int>((state >> shifts[i]) & 7);
   return present;
 }
 

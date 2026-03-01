@@ -12,30 +12,113 @@ using namespace std;
 // ════════════════════════════════════════════════════════════════════════════
 // State Type Selection (based on grid size)
 // ════════════════════════════════════════════════════════════════════════════
-// Each position needs 3 bits (types 0-4)
-// uint64_t: 64 bits / 3 = 21 positions max
-// Custom 128-bit using SIMD: 128 bits / 3 = 42 positions max
+// Each position needs 3 bits (types 0-4). 128-bit → 42 positions max.
 
-// Use native __uint128_t (GCC/Clang compiler built-in)
-using uint128_simd = __uint128_t;
-
-using StateType64 = uint64_t;
-using StateType128 = uint128_simd;
-
-// Hash specialization for __uint128_t (needed for robin_hood and std maps)
-// Only define if not already provided by standard library (GCC 13+ has it)
-#if !defined(__GLIBCXX__) || (__GLIBCXX__ < 20230528)
+#if defined(_MSC_VER)
+// MSVC: 128-bit state in __m128i (SSE2/AVX2), passed in XMM for stable ABI.
+#include <immintrin.h>
+struct uint128_simd {
+  union {
+    __m128i v;
+    struct {
+      uint64_t lo;
+      uint64_t hi;
+    } u;
+  };
+  uint128_simd() : v(_mm_setzero_si128()) {}
+  uint128_simd(uint64_t l, uint64_t h = 0) {
+    u.lo = l;
+    u.hi = h;
+  }
+  uint128_simd(int x) {
+    u.lo = static_cast<uint64_t>(x);
+    u.hi = 0;
+  }
+  uint128_simd operator<<(int n) const {
+    if (n <= 0)
+      return *this;
+    if (n >= 64)
+      return uint128_simd(0, u.lo << (n - 64));
+    return uint128_simd(u.lo << n, (u.hi << n) | (u.lo >> (64 - n)));
+  }
+  uint128_simd operator>>(int n) const {
+    if (n <= 0)
+      return *this;
+    if (n >= 64)
+      return uint128_simd(u.hi >> (n - 64), 0);
+    return uint128_simd((u.lo >> n) | (u.hi << (64 - n)), u.hi >> n);
+  }
+  uint128_simd operator&(uint128_simd o) const {
+    uint128_simd r;
+    r.v = _mm_and_si128(v, o.v);
+    return r;
+  }
+  uint128_simd operator&(uint64_t m) const { return uint128_simd(u.lo & m, 0); }
+  uint128_simd operator&(int m) const {
+    return uint128_simd(u.lo & static_cast<uint64_t>(m), 0);
+  }
+  uint128_simd operator|(uint128_simd o) const {
+    uint128_simd r;
+    r.v = _mm_or_si128(v, o.v);
+    return r;
+  }
+  uint128_simd operator~() const {
+    uint128_simd r;
+    r.v = _mm_xor_si128(v, _mm_set1_epi64x(-1));
+    return r;
+  }
+  uint128_simd &operator&=(uint128_simd o) {
+    v = _mm_and_si128(v, o.v);
+    return *this;
+  }
+  uint128_simd &operator|=(uint128_simd o) {
+    v = _mm_or_si128(v, o.v);
+    return *this;
+  }
+  bool operator==(uint128_simd o) const {
+    return u.lo == o.u.lo && u.hi == o.u.hi;
+  }
+  bool operator==(int o) const {
+    return u.hi == 0 && u.lo == static_cast<uint64_t>(o);
+  }
+  bool operator!=(uint128_simd o) const {
+    return u.lo != o.u.lo || u.hi != o.u.hi;
+  }
+  bool operator!=(int o) const {
+    return u.hi != 0 || u.lo != static_cast<uint64_t>(o);
+  }
+  bool operator<(uint128_simd o) const {
+    return u.hi != o.u.hi ? u.hi < o.u.hi : u.lo < o.u.lo;
+  }
+  operator uint64_t() const { return u.lo; }
+  operator int() const { return static_cast<int>(u.lo); }
+};
 namespace std {
-template <> struct hash<__uint128_t> {
-  size_t operator()(__uint128_t x) const noexcept {
-    // Simple hash: XOR the upper and lower 64 bits
-    uint64_t low = static_cast<uint64_t>(x);
-    uint64_t high = static_cast<uint64_t>(x >> 64);
-    return std::hash<uint64_t>{}(low) ^ (std::hash<uint64_t>{}(high) << 1);
+template <> struct hash<uint128_simd> {
+  size_t operator()(const uint128_simd &x) const noexcept {
+    return std::hash<uint64_t>{}(x.u.lo) ^ (std::hash<uint64_t>{}(x.u.hi) << 1);
+  }
+};
+} // namespace std
+
+#elif defined(__clang__)
+using uint128_simd = __uint128_t;
+#endif
+
+#if !defined(_MSC_VER)
+namespace std {
+template <> struct hash<uint128_simd> {
+  size_t operator()(uint128_simd x) const noexcept {
+    uint64_t lo = static_cast<uint64_t>(x);
+    uint64_t hi = static_cast<uint64_t>(x >> 64);
+    return std::hash<uint64_t>{}(lo) ^ (std::hash<uint64_t>{}(hi) << 1);
   }
 };
 } // namespace std
 #endif
+
+using StateType64 = uint64_t;
+using StateType128 = uint128_simd;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Configuration Constants
@@ -134,4 +217,3 @@ const string FG_COLORS[] = {
     "\033[33m", // Yellow foreground - type 3
     "\033[37m"  // White foreground  - type 4
 };
-

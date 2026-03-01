@@ -20,8 +20,7 @@
       "cmakeCommandArgs": "",
       "buildCommandArgs": "",
       "ctestCommandArgs": "",
-      "inheritEnvironments": [ "msvc_x64_x64" ],
-      "variables": []
+      "inheritEnvironments": [ "msvc_x64_x64" ]
     },
     {
       "name": "Linux-Debug",
@@ -35,13 +34,16 @@
       "variables": [
         {
           "name": "CMAKE_C_COMPILER",
-          "value": "gcc"
+          "value": "gcc",
+          "type": "STRING"
         },
         {
           "name": "CMAKE_CXX_COMPILER",
-          "value": "g++"
+          "value": "g++",
+          "type": "STRING"
         }
-      ]
+      ],
+      "inheritEnvironments": []
     },
     {
       "name": "Linux-Release",
@@ -55,13 +57,40 @@
       "variables": [
         {
           "name": "CMAKE_C_COMPILER",
-          "value": "gcc"
+          "value": "gcc",
+          "type": "STRING"
         },
         {
           "name": "CMAKE_CXX_COMPILER",
-          "value": "g++"
+          "value": "g++",
+          "type": "STRING"
         }
-      ]
+      ],
+      "inheritEnvironments": []
+    },
+    {
+      "name": "x64-Clang-Release",
+      "generator": "Ninja",
+      "configurationType": "RelWithDebInfo",
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "inheritEnvironments": [ "clang_cl_x64_x64" ],
+      "variables": []
+    },
+    {
+      "name": "x64-Clang-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "inheritEnvironments": [ "clang_cl_x64_x64" ],
+      "variables": []
     }
   ]
 }
