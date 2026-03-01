@@ -14,8 +14,8 @@ using namespace std;
 // ════════════════════════════════════════════════════════════════════════════
 // Each position needs 3 bits (types 0-4). 128-bit → 42 positions max.
 
-#if defined(_MSC_VER)
-// MSVC: 128-bit state in __m128i (SSE2/AVX2), passed in XMM for stable ABI.
+#if defined(_WIN32)
+// Windows (MSVC or Clang): 128-bit state in __m128i (SSE2/AVX2), passed in XMM for stable ABI.
 #include <immintrin.h>
 struct uint128_simd {
   union {
@@ -105,7 +105,7 @@ template <> struct hash<uint128_simd> {
 using uint128_simd = __uint128_t;
 #endif
 
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 namespace std {
 template <> struct hash<uint128_simd> {
   size_t operator()(uint128_simd x) const noexcept {
