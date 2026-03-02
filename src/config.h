@@ -14,7 +14,6 @@ using namespace std;
 // ════════════════════════════════════════════════════════════════════════════
 // Each position needs 3 bits (types 0-4). 128-bit → 42 positions max.
 
-#if defined(_WIN32)
 // Windows (MSVC or Clang): 128-bit state in __m128i (SSE2/AVX2), passed in XMM for stable ABI.
 #include <immintrin.h>
 struct uint128_simd {
@@ -101,22 +100,6 @@ template <> struct hash<uint128_simd> {
 };
 } // namespace std
 
-#elif defined(__clang__)
-using uint128_simd = __uint128_t;
-#endif
-
-#if !defined(_WIN32)
-namespace std {
-template <> struct hash<uint128_simd> {
-  size_t operator()(uint128_simd x) const noexcept {
-    uint64_t lo = static_cast<uint64_t>(x);
-    uint64_t hi = static_cast<uint64_t>(x >> 64);
-    return std::hash<uint64_t>{}(lo) ^ (std::hash<uint64_t>{}(hi) << 1);
-  }
-};
-} // namespace std
-#endif
-
 using StateType64 = uint64_t;
 using StateType128 = uint128_simd;
 
@@ -133,11 +116,11 @@ using StateType128 = uint128_simd;
 const int MAX_UNLOCKED_TYPE = 4;
 
 // Baseline generation: generate baselines for unlocked types in this range
-const int UNLOCKED_TYPE_START = 1; // First type to generate baseline for
+const int UNLOCKED_TYPE_START = 4; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 4;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 1; // First level to process
+const int LEVEL_START = 5; // First level to process
 const int LEVEL_END = 5;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
