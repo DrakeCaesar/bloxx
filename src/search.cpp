@@ -428,83 +428,81 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     return towersLeft;
   };
 
-  auto pruneSide = [&](auto &parentMap, auto &queue, bool keepLowest) {
+  // Queue entries: (state, tower count) so pruning never calls countTowersLeft
+  // over the full queue.
+  using QueueEntry = std::pair<StateType, int>;
+
+  // Prune: keep only frontier states that pass cutoff + their ancestors.
+  // Build pruned map by walking backwards from kept frontier (no full parentMap
+  // scan, no separate keepStates set).
+  auto pruneSide = [&](auto &parentMap, std::deque<QueueEntry> &queue,
+                       bool keepLowest) {
     if (parentMap.size() <= kPruneThreshold || queue.empty())
       return;
 
     int minTowers = g_numPos;
     int maxTowers = 0;
-    vector<pair<StateType, int>> scored;
-    scored.reserve(queue.size());
-    for (const auto &s : queue) {
-      int towersLeft = countTowersLeft(s);
-      minTowers = min(minTowers, towersLeft);
-      maxTowers = max(maxTowers, towersLeft);
-      scored.push_back({s, towersLeft});
+    for (const auto &entry : queue) {
+      int tc = entry.second;
+      minTowers = min(minTowers, tc);
+      maxTowers = max(maxTowers, tc);
     }
 
     int cutoff = keepLowest ? (minTowers + kPruneLowDelta)
                             : (maxTowers - kPruneHighDelta);
-    robin_hood::unordered_set<StateType> keepStates;
-    keepStates.reserve(queue.size());
-    for (const auto &entry : scored) {
+    vector<QueueEntry> toProcess;
+    toProcess.reserve(queue.size());
+    for (const auto &entry : queue) {
       if ((keepLowest && entry.second <= cutoff) ||
           (!keepLowest && entry.second >= cutoff)) {
-        keepStates.insert(entry.first);
+        toProcess.push_back(entry);
       }
     }
 
-    if (keepStates.empty()) {
-      // Fallback: keep the single best node by tower count.
-      auto bestIt = scored.begin();
-      if (keepLowest) {
-        bestIt = min_element(
-            scored.begin(), scored.end(),
-            [](const auto &a, const auto &b) { return a.second < b.second; });
-      } else {
-        bestIt = max_element(
-            scored.begin(), scored.end(),
-            [](const auto &a, const auto &b) { return a.second < b.second; });
-      }
-      keepStates.insert(bestIt->first);
-    }
-
-    std::deque<StateType> newQueue;
-    newQueue.resize(0);
-    for (const auto &s : queue) {
-      if (keepStates.find(s) != keepStates.end())
-        newQueue.push_back(s);
-    }
-    queue.swap(newQueue);
-
-    vector<StateType> stack(keepStates.begin(), keepStates.end());
-    for (size_t i = 0; i < stack.size(); i++) {
-      StateType cur = stack[i];
-      auto it = parentMap.find(cur);
-      if (it == parentMap.end() || it->second.getPos() == -1)
-        continue;
-      StateType parent = it->second.parent;
-      if (keepStates.insert(parent).second)
-        stack.push_back(parent);
+    if (toProcess.empty()) {
+      auto bestIt = keepLowest
+                        ? min_element(queue.begin(), queue.end(),
+                                      [](const auto &a, const auto &b) {
+                                        return a.second < b.second;
+                                      })
+                        : max_element(queue.begin(), queue.end(),
+                                      [](const auto &a, const auto &b) {
+                                        return a.second > b.second;
+                                      });
+      toProcess.push_back(*bestIt);
     }
 
     using MapType = std::decay_t<decltype(parentMap)>;
     MapType pruned;
-    pruned.reserve(keepStates.size() * 2);
-    for (const auto &kv : parentMap) {
-      if (keepStates.find(kv.first) != keepStates.end())
-        pruned.insert(kv);
+    pruned.reserve(toProcess.size() * 4);
+    for (const auto &entry : toProcess)
+      pruned[entry.first] = parentMap.at(entry.first);
+
+    std::deque<QueueEntry> worklist(toProcess.begin(), toProcess.end());
+    while (!worklist.empty()) {
+      StateType cur = worklist.front().first;
+      worklist.pop_front();
+      auto it = parentMap.find(cur);
+      if (it == parentMap.end() || it->second.getPos() == -1)
+        continue;
+      StateType parent = it->second.parent;
+      if (parentMap.count(parent) && pruned.find(parent) == pruned.end()) {
+        pruned[parent] = parentMap.find(parent)->second;
+        worklist.push_back({parent, countTowersLeft(parent)});
+      }
     }
+
     parentMap.swap(pruned);
+    queue.assign(toProcess.begin(), toProcess.end());
   };
 
-  std::deque<StateType> qForward;
-  std::deque<StateType> qReverse;
+  std::deque<QueueEntry> qForward;
+  std::deque<QueueEntry> qReverse;
 
   parentForward[0] = {0, -1, -1};
-  qForward.push_back(0);
+  qForward.push_back({0, 0});
   parentReverse[finalState] = {finalState, -1, -1};
-  qReverse.push_back(finalState);
+  qReverse.push_back({finalState, countTowersLeft(finalState)});
 
   size_t depth = 0;
   double lastReverseLayerMs = 0.0;
@@ -543,29 +541,25 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       minTowerStates.clear();
 
       for (size_t i = 0; i < layerCount; i++) {
-        StateType cur = qReverse.front();
+        StateType cur = qReverse.front().first;
+        int curTowers = qReverse.front().second;
         qReverse.pop_front();
-        int towersLeft = 0;
-        for (int pos = 0; pos < g_numPos; pos++) {
-          if (stateGet(cur, pos) != 0)
-            towersLeft++;
-        }
         if (!anyProcessed) {
-          minTowersLeft = towersLeft;
-          maxTowersLeft = towersLeft;
+          minTowersLeft = curTowers;
+          maxTowersLeft = curTowers;
           anyProcessed = true;
           minTowerStates.clear();
           minTowerStates.push_back(cur);
         } else {
-          if (towersLeft < minTowersLeft) {
-            minTowersLeft = towersLeft;
+          if (curTowers < minTowersLeft) {
+            minTowersLeft = curTowers;
             minTowerStates.clear();
             minTowerStates.push_back(cur);
-          } else if (towersLeft == minTowersLeft) {
+          } else if (curTowers == minTowersLeft) {
             minTowerStates.push_back(cur);
           }
-          minTowersLeft = min(minTowersLeft, towersLeft);
-          maxTowersLeft = max(maxTowersLeft, towersLeft);
+          minTowersLeft = min(minTowersLeft, curTowers);
+          maxTowersLeft = max(maxTowersLeft, curTowers);
         }
         if (cur == 0) {
           qReverse.clear();
@@ -589,7 +583,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
                     .emplace(next,
                              Transition{cur, (int8_t)pos, (int8_t)curType})
                     .second) {
-              qReverse.push_back(next);
+              int nextTowers =
+                  curTowers - (curType != 0 ? 1 : 0) + (prevType != 0 ? 1 : 0);
+              qReverse.push_back({next, nextTowers});
               if (parentForward.find(next) != parentForward.end()) {
                 meetState = next;
                 found = true;
@@ -600,31 +596,39 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       }
 
       auto layerEnd = chrono::steady_clock::now();
-      double layerMs =
+      double expandMs =
           chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
               .count();
-      double pctDelta =
-          lastReverseLayerMs > 0.0
-              ? ((layerMs - lastReverseLayerMs) / lastReverseLayerMs) * 100.0
-              : 0.0;
+
+      double pruneMs = 0.0;
+      if (!found) {
+        auto pruneStart = chrono::steady_clock::now();
+        pruneSide(parentReverse, qReverse, true);
+        pruneMs = chrono::duration_cast<chrono::milliseconds>(
+                      chrono::steady_clock::now() - pruneStart)
+                      .count();
+      }
+      double totalMs = expandMs + pruneMs;
+      double pctDelta = (lastReverseLayerMs > 0.0)
+                           ? ((totalMs - lastReverseLayerMs) / lastReverseLayerMs) * 100.0
+                           : 0.0;
+      lastReverseLayerMs = totalMs;
       if (!headerPrinted) {
-        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬────────"
-                "─┬─────────────┬──────────┐\n";
-        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%    "
-                " │ Towers L/R  │ L+R      │\n";
-        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼────────"
-                "─┼─────────────┼──────────┤\n";
+        cout << "┌──────┬──────────┬─────────────┬─────────────┬────────────┬────────"
+                "────┬────────────┬────────┬─────────────┬──────────┐\n";
+        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Expand(ms) │ Prune"
+                "(ms)  │ Σ(ms)      │ ∆%     │ Towers L/R  │ L+R      │\n";
+        cout << "├──────┼──────────┼─────────────┼─────────────┼────────────┼────────"
+                "────┼────────────┼────────┼─────────────┼──────────┤\n";
         headerPrinted = true;
       }
       totalReverse += layerCount;
-      printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ "
-             "%8zu │\n",
-             depth, layerCount, totalReverse, layerMs, pctDelta, minTowersLeft,
-             maxTowersLeft, totalReverse + totalForward);
+      printf("│ Rev  │ %8zu │ %11zu │ %11zu │ %10.0f │ %10.0f │ %8.0f │ %6.1f │ "
+             "%2d / %-2d     │ %8zu │\n",
+             depth, layerCount, totalReverse, expandMs, pruneMs, totalMs,
+             pctDelta, minTowersLeft, maxTowersLeft,
+             totalReverse + totalForward);
 
-      lastReverseLayerMs = layerMs;
-      if (!found)
-        pruneSide(parentReverse, qReverse, true);
       depth++;
     } else {
       // Expand forward
@@ -636,29 +640,25 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       vector<StateType> maxTowerStates;
 
       for (size_t i = 0; i < forwardLayerCount; i++) {
-        StateType cur = qForward.front();
+        StateType cur = qForward.front().first;
+        int curTowers = qForward.front().second;
         qForward.pop_front();
-        int towersLeft = 0;
-        for (int pos = 0; pos < g_numPos; pos++) {
-          if (stateGet(cur, pos) != 0)
-            towersLeft++;
-        }
         if (!anyForwardProcessed) {
-          minForwardTowersLeft = towersLeft;
-          maxForwardTowersLeft = towersLeft;
+          minForwardTowersLeft = curTowers;
+          maxForwardTowersLeft = curTowers;
           anyForwardProcessed = true;
           maxTowerStates.clear();
           maxTowerStates.push_back(cur);
         } else {
-          if (towersLeft > maxForwardTowersLeft) {
-            maxForwardTowersLeft = towersLeft;
+          if (curTowers > maxForwardTowersLeft) {
+            maxForwardTowersLeft = curTowers;
             maxTowerStates.clear();
             maxTowerStates.push_back(cur);
-          } else if (towersLeft == maxForwardTowersLeft) {
+          } else if (curTowers == maxForwardTowersLeft) {
             maxTowerStates.push_back(cur);
           }
-          minForwardTowersLeft = min(minForwardTowersLeft, towersLeft);
-          maxForwardTowersLeft = max(maxForwardTowersLeft, towersLeft);
+          minForwardTowersLeft = min(minForwardTowersLeft, curTowers);
+          maxForwardTowersLeft = max(maxForwardTowersLeft, curTowers);
         }
 
         for (int pos = 0; pos < g_numPos; pos++) {
@@ -676,7 +676,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
                     .emplace(next,
                              Transition{cur, (int8_t)pos, (int8_t)newType})
                     .second) {
-              qForward.push_back(next);
+              int nextTowers =
+                  curTowers - (curType != 0 ? 1 : 0) + (newType != 0 ? 1 : 0);
+              qForward.push_back({next, nextTowers});
               if (parentReverse.find(next) != parentReverse.end()) {
                 meetState = next;
                 found = true;
@@ -687,41 +689,49 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       }
 
       auto forwardLayerEnd = chrono::steady_clock::now();
-      double forwardLayerMs =
+      double expandMs =
           chrono::duration_cast<chrono::milliseconds>(forwardLayerEnd -
                                                       forwardLayerStart)
               .count();
-      double forwardPctDelta =
-          lastForwardLayerMs > 0.0
-              ? ((forwardLayerMs - lastForwardLayerMs) / lastForwardLayerMs) *
-                    100.0
-              : 0.0;
+
+      double pruneMs = 0.0;
+      if (!found) {
+        auto pruneStart = chrono::steady_clock::now();
+        pruneSide(parentForward, qForward, false);
+        pruneMs = chrono::duration_cast<chrono::milliseconds>(
+                      chrono::steady_clock::now() - pruneStart)
+                      .count();
+      }
+      double totalMs = expandMs + pruneMs;
+      double forwardPctDelta = (lastForwardLayerMs > 0.0)
+                                   ? ((totalMs - lastForwardLayerMs) /
+                                      lastForwardLayerMs) * 100.0
+                                   : 0.0;
+      lastForwardLayerMs = totalMs;
+
       if (!headerPrinted) {
-        cout << "┌──────┬──────────┬─────────────┬─────────────┬──────────┬────────"
-                "─┬─────────────┬──────────┐\n";
-        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Time(ms) │ ∆%    "
-                " │ Towers L/R  │ L+R      │\n";
-        cout << "├──────┼──────────┼─────────────┼─────────────┼──────────┼────────"
-                "─┬─────────────┬──────────┤\n";
+        cout << "┌──────┬──────────┬─────────────┬─────────────┬────────────┬────────"
+                "────┬────────────┬────────┬─────────────┬──────────┐\n";
+        cout << "│ Dir  │ Layer    │ Size        │ Total       │ Expand(ms) │ Prune"
+                "(ms)  │ Σ(ms)      │ ∆%     │ Towers L/R  │ L+R      │\n";
+        cout << "├──────┼──────────┼─────────────┼─────────────┼────────────┼────────"
+                "────┼────────────┼────────┼─────────────┼──────────┤\n";
         headerPrinted = true;
       }
       totalForward += forwardLayerCount;
-      printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %8.0f │ %7.1f │ %2d / %-2d     │ "
-             "%8zu │\n",
-             forwardDepth, forwardLayerCount, totalForward, forwardLayerMs,
-             forwardPctDelta, minForwardTowersLeft, maxForwardTowersLeft,
+      printf("│ Fwd  │ %8zu │ %11zu │ %11zu │ %10.0f │ %10.0f │ %8.0f │ %6.1f │ "
+             "%2d / %-2d     │ %8zu │\n",
+             forwardDepth, forwardLayerCount, totalForward, expandMs, pruneMs,
+             totalMs, forwardPctDelta, minForwardTowersLeft, maxForwardTowersLeft,
              totalReverse + totalForward);
 
-      lastForwardLayerMs = forwardLayerMs;
-      if (!found)
-        pruneSide(parentForward, qForward, false);
       forwardDepth++;
     }
   }
 
   if (headerPrinted)
-    cout << "└──────┴──────────┴─────────────┴─────────────┴──────────┴────────"
-            "─┴─────────────┴──────────┘\n";
+    cout << "└──────┴──────────┴─────────────┴─────────────┴────────────┴────────"
+            "────┴────────────┴────────┴─────────────┴──────────┘\n";
 
   if (!found)
     return {};
