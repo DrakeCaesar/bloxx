@@ -183,7 +183,7 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
   vector<pair<int, int>> out;
   out.reserve(steps.size() * 2);
   uint64_t placed = 0; // bit i = position i has been explicitly placed
-  StateType phys = 0;  // canonical state — mirrors what printExpandedPath tracks
+  StateType phys = 0; // canonical state — mirrors what printExpandedPath tracks
 
   for (auto [pos, newType] : steps) {
     // For each required neighbor type req in 0..newType-1,
@@ -464,15 +464,14 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     }
 
     if (toProcess.empty()) {
-      auto bestIt = keepLowest
-                        ? min_element(queue.begin(), queue.end(),
-                                      [](const auto &a, const auto &b) {
-                                        return a.second < b.second;
-                                      })
-                        : max_element(queue.begin(), queue.end(),
-                                      [](const auto &a, const auto &b) {
-                                        return a.second > b.second;
-                                      });
+      auto bestIt = keepLowest ? min_element(queue.begin(), queue.end(),
+                                             [](const auto &a, const auto &b) {
+                                               return a.second < b.second;
+                                             })
+                               : max_element(queue.begin(), queue.end(),
+                                             [](const auto &a, const auto &b) {
+                                               return a.second > b.second;
+                                             });
       toProcess.push_back(*bestIt);
     }
 
@@ -510,16 +509,19 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   std::mutex coutMutex;
   std::atomic<bool> reverseFinished{false};
-  size_t totalReverseVisited = 0; // total states ever discovered by reverse (before pruning)
+  size_t totalReverseVisited =
+      0; // total states ever discovered by reverse (before pruning)
 
-  // Result of expanding one state in reverse: (next state, transition, next tower count).
+  // Result of expanding one state in reverse: (next state, transition, next
+  // tower count).
   struct ReverseExpansion {
     StateType next;
     Transition trans;
     int nextTowers;
   };
 
-  // Expand a range of (cur, curTowers) into a list of new states (no shared map writes).
+  // Expand a range of (cur, curTowers) into a list of new states (no shared map
+  // writes).
   auto reverseExpandChunk = [&](const QueueEntry *start, const QueueEntry *end,
                                 vector<ReverseExpansion> *out) {
     for (; start != end; ++start) {
@@ -589,12 +591,12 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
                 .count();
         lock_guard<mutex> lock(coutMutex);
         cout << "[Reverse] Layer " << depth << " done in " << expandMs
-             << " ms (expand " << expandMs << " ms). Reached state 0."
-             << endl;
+             << " ms (expand " << expandMs << " ms). Reached state 0." << endl;
         break;
       }
 
-      // Split layer across N threads; each expands its chunk into a local vector.
+      // Split layer across N threads; each expands its chunk into a local
+      // vector.
       const int numThreads =
           max(1, min(REVERSE_BFS_NUM_THREADS, (int)layer.size()));
       const size_t chunkSize =
@@ -605,8 +607,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
       vector<thread> revThreads;
       for (int c = 0; c < numThreads; c++) {
-        const QueueEntry *chunkStart =
-            layer.data() + (size_t)c * chunkSize;
+        const QueueEntry *chunkStart = layer.data() + (size_t)c * chunkSize;
         const QueueEntry *chunkEnd =
             layer.data() + min((size_t)(c + 1) * chunkSize, layer.size());
         if (chunkStart < chunkEnd)
@@ -644,8 +645,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         lock_guard<mutex> lock(coutMutex);
         cout << "[Reverse] Layer " << depth << " done in " << totalMs
              << " ms (expand " << expandMs << " ms, prune " << pruneMs
-             << " ms). Queue size now " << qReverse.size()
-             << ", map size " << parentReverse.size() << "." << endl;
+             << " ms). Queue size now " << qReverse.size() << ", map size "
+             << parentReverse.size() << "." << endl;
       }
       depth++;
     }
@@ -656,7 +657,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     reverseFinished = true;
   };
 
-  // Forward BFS: stops as soon as reverse finishes (check inside layer so we don't wait).
+  // Forward BFS: stops as soon as reverse finishes (check inside layer so we
+  // don't wait).
   auto forwardTask = [&]() {
     size_t forwardDepth = 0;
     while (!qForward.empty()) {
@@ -718,10 +720,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       }
 
       auto forwardLayerEnd = chrono::steady_clock::now();
-      double expandMs =
-          chrono::duration_cast<chrono::milliseconds>(forwardLayerEnd -
-                                                      forwardLayerStart)
-              .count();
+      double expandMs = chrono::duration_cast<chrono::milliseconds>(
+                            forwardLayerEnd - forwardLayerStart)
+                            .count();
       double pruneMs = 0.0;
       if (!stoppedByReverse && !qForward.empty()) {
         auto pruneStart = chrono::steady_clock::now();
@@ -735,8 +736,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         lock_guard<mutex> lock(coutMutex);
         cout << "[Forward] Layer " << forwardDepth << " done in " << totalMs
              << " ms (expand " << expandMs << " ms, prune " << pruneMs
-             << " ms). Queue size now " << qForward.size()
-             << ", map size " << parentForward.size();
+             << " ms). Queue size now " << qForward.size() << ", map size "
+             << parentForward.size();
         if (stoppedByReverse)
           cout << " (stopped mid-layer: reverse finished)";
         cout << "." << endl;
@@ -747,8 +748,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     }
     {
       lock_guard<mutex> lock(coutMutex);
-      cout << "[Forward] Forward BFS finished (queue empty or reverse finished)."
-           << endl;
+      cout
+          << "[Forward] Forward BFS finished (queue empty or reverse finished)."
+          << endl;
     }
   };
 
@@ -773,7 +775,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     cout << "[Main] Both threads done. Finding best intercept..." << endl;
   }
 
-  // Best intercept: state that appears in both maps with minimum total path length.
+  // Best intercept: state that appears in both maps with minimum total path
+  // length.
   auto forwardDepthOf = [&parentForward](StateType s) {
     int d = 0;
     StateType cur = s;
@@ -822,7 +825,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   if (interceptCount == 0) {
     lock_guard<mutex> lock(coutMutex);
     cout << "[Main] No intercept: no state reached by both searches. Cannot "
-            "reconstruct path." << endl;
+            "reconstruct path."
+         << endl;
     return {};
   }
 
@@ -1094,18 +1098,22 @@ static SearchResult runSlidingWindow() {
             .count();
 
     // Print summary table
-    cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬──────┬───────"
+    cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬────"
+            "──┬───────"
             "┐\n";
-    cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ Imp  │ "
+    cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ Imp  "
+            "│ "
             "Score │\n";
-    cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼──────┼──────"
+    cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼──────"
+            "┼──────"
             "─┤\n";
     for (const auto &s : stats) {
       printf("│ %3d │ (%d, %d)  │ %12d │ %14lld │ %6lldms │  %s  │ %5d │\n",
              s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored, s.timeMs,
              s.improved ? "Y" : "N", s.scoreAfter);
     }
-    cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴──────┴──────"
+    cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴──────"
+            "┴──────"
             "─┘\n";
     cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner]
          << "): score " << currentScore << " (" << passMs << "ms, " << explored
@@ -1345,4 +1353,3 @@ void runSingleLevel() {
     printBuildPath(result.bestState, pathMap);
   }
 }
-
