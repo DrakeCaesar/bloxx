@@ -1,5 +1,5 @@
 
-Reverse BFS visited 1164197 states.
+Reverse BFS visited 75625065 states (map size after pruning: 8762).
 
 --- Build path (60 steps) ---
 
