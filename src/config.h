@@ -14,7 +14,8 @@ using namespace std;
 // ════════════════════════════════════════════════════════════════════════════
 // Each position needs 3 bits (types 0-4). 128-bit → 42 positions max.
 
-// Windows (MSVC or Clang): 128-bit state in __m128i (SSE2/AVX2), passed in XMM for stable ABI.
+// Windows (MSVC or Clang): 128-bit state in __m128i (SSE2/AVX2), passed in XMM
+// for stable ABI.
 #include <immintrin.h>
 struct uint128_simd {
   union {
@@ -128,6 +129,9 @@ inline int &getCurrentLevel() {
   static int currentLevel = LEVEL;
   return currentLevel;
 }
+
+// Reverse BFS (path reconstruction): number of threads per layer
+const int REVERSE_BFS_NUM_THREADS = 8;
 
 // Sliding window parameters
 const int MAX_DEPTH = 10; // Maximum BFS depth per window
