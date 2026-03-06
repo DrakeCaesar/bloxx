@@ -121,8 +121,8 @@ const int UNLOCKED_TYPE_START = 4; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 4;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 5; // First level to process
-const int LEVEL_END = 5;   // Last level to process (inclusive)
+const int LEVEL_START = 3; // First level to process
+const int LEVEL_END = 3;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {
