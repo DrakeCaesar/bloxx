@@ -1,5 +1,6 @@
 
-Reverse BFS visited 414835 states (map size after pruning: 4429).
+Reverse BFS visited 8101222 states (map size after pruning: 7570).
+[Main] Found 3369 states in both maps. Best intercept has forward depth 7, reverse depth 15, total 22 steps.
 
 --- Build path (36 steps) ---
 

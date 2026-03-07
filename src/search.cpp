@@ -446,10 +446,11 @@ bfsShortestPath(StateType target) {
 static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   const StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
 
-  ankerl::unordered_dense::map<StateType, Transition> parentForward;
   ankerl::unordered_dense::map<StateType, Transition> parentReverse;
-  parentForward.reserve(1ull << 26); // ~64M elements
   parentReverse.reserve(1ull << 26); // ~64M elements
+  ankerl::unordered_dense::map<StateType, Transition> parentForward;
+  if (RUN_PARALLEL_FORWARD_BFS)
+    parentForward.reserve(1ull << 26); // ~64M elements
 
   const size_t kPruneThreshold = 10000;
   const int kPruneLowDelta = 3;
@@ -533,11 +534,12 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     queue.assign(toProcess.begin(), toProcess.end());
   };
 
-  std::deque<QueueEntry> qForward;
   std::deque<QueueEntry> qReverse;
-
-  parentForward[pathStartState] = {pathStartState, -1, -1};
-  qForward.push_back({pathStartState, countTowersLeft(pathStartState)});
+  std::deque<QueueEntry> qForward;
+  if (RUN_PARALLEL_FORWARD_BFS) {
+    parentForward[pathStartState] = {pathStartState, -1, -1};
+    qForward.push_back({pathStartState, countTowersLeft(pathStartState)});
+  }
   parentReverse[finalState] = {finalState, -1, -1};
   qReverse.push_back({finalState, countTowersLeft(finalState)});
 
@@ -546,7 +548,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   size_t totalReverseVisited =
       0; // total states ever discovered by reverse (before pruning)
 
-  // Legal transitions governed by FORWARD_TRANSITIONS / BACKWARD_TRANSITIONS*
+  // Legal transitions: FORWARD_TRANSITIONS (normal BFS); BACKWARD_TRANSITIONS*
   // tables in config.h (plus runtime canPlace() neighbor check).
   // Forward stores Transition(parent, pos, newType); reverse stores (cur, pos,
   // curType). Reverse path reconstruction searches for (p,t) with
@@ -799,27 +801,70 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   {
     lock_guard<mutex> lock(coutMutex);
-    cout << "[Main] Starting reverse BFS (to completion) and forward BFS in "
-            "parallel. Forward will stop as soon as reverse finishes."
-         << endl;
+    if (RUN_PARALLEL_FORWARD_BFS)
+      cout << "[Main] Starting reverse BFS (to completion) and forward BFS in "
+              "parallel. Forward will stop as soon as reverse finishes."
+           << endl;
+    else
+      cout << "[Main] Reverse BFS only (parallel forward disabled)." << endl;
   }
   thread tReverse(reverseTask);
-  thread tForward(forwardTask);
+  thread tForward;
+  if (RUN_PARALLEL_FORWARD_BFS)
+    tForward = thread(forwardTask);
   tReverse.join();
-  {
-    lock_guard<mutex> lock(coutMutex);
-    cout << "[Main] Reverse finished. Not waiting for forward to complete; "
-            "stopping forward and finding best intercept with current state."
-         << endl;
-  }
-  tForward.join();
-  {
-    lock_guard<mutex> lock(coutMutex);
-    cout << "[Main] Both threads done. Finding best intercept..." << endl;
+  if (RUN_PARALLEL_FORWARD_BFS) {
+    {
+      lock_guard<mutex> lock(coutMutex);
+      cout << "[Main] Reverse finished. Not waiting for forward to complete; "
+              "stopping forward and finding best intercept with current state."
+           << endl;
+    }
+    tForward.join();
   }
 
-  // Best intercept: state that appears in both maps with minimum total path
-  // length.
+  // Redirect output to file if baseline mode is active (after BFS table
+  // completes)
+  if (g_baselineFile && g_baselineFile->is_open()) {
+    g_originalCoutBuf = cout.rdbuf();
+    cout.rdbuf(g_baselineFile->rdbuf());
+  }
+
+  cout << "\nReverse BFS visited " << totalReverseVisited
+       << " states (map size after pruning: " << parentReverse.size() << ").\n";
+
+  vector<pair<int, int>> steps;
+
+  if (!RUN_PARALLEL_FORWARD_BFS) {
+    // parentReverse[state].parent = state we came from (toward final). So walk
+    // from pathStartState toward finalState to get steps in build order.
+    if (parentReverse.count(pathStartState) == 0) {
+      lock_guard<mutex> lock(coutMutex);
+      cout << "[Main] Reverse BFS did not reach path start. Cannot build path."
+           << endl;
+      return {};
+    }
+    StateType cur = pathStartState;
+    while (cur != finalState) {
+      StateType parent = parentReverse.at(cur).parent;
+      bool foundStep = false;
+      int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
+      for (int p = 0; p < g_numPos && !foundStep; p++) {
+        for (int t = stepTypeMin; t <= g_maxType[p] && !foundStep; t++) {
+          if (t == stateGet(cur, p))
+            continue;
+          if (canonical(stateSet(cur, p, t)) == parent) {
+            steps.push_back({p, t});
+            foundStep = true;
+          }
+        }
+      }
+      cur = parent;
+    }
+    return steps;
+  }
+
+  // Meet-in-the-middle: find best intercept and build path from both maps.
   auto forwardDepthOf = [&parentForward](StateType s) {
     int d = 0;
     StateType cur = s;
@@ -829,7 +874,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     }
     return d;
   };
-  auto reverseDepthOf = [&parentReverse, &finalState](StateType s) {
+  auto reverseDepthOf = [&parentReverse](StateType s) {
     int d = 0;
     StateType cur = s;
     while (parentReverse.count(cur) && parentReverse.at(cur).getPos() != -1) {
@@ -873,17 +918,6 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     return {};
   }
 
-  // Redirect output to file if baseline mode is active (after BFS table
-  // completes)
-  if (g_baselineFile && g_baselineFile->is_open()) {
-    g_originalCoutBuf = cout.rdbuf();
-    cout.rdbuf(g_baselineFile->rdbuf());
-  }
-
-  cout << "\nReverse BFS visited " << totalReverseVisited
-       << " states (map size after pruning: " << parentReverse.size() << ").\n";
-
-  vector<pair<int, int>> steps;
   vector<pair<int, int>> stepsForward;
   StateType cur = meetState;
   while (parentForward.at(cur).getPos() != -1) {
@@ -896,9 +930,6 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   cur = meetState;
   while (parentReverse.at(cur).getPos() != -1) {
     StateType parent = parentReverse.at(cur).parent;
-    // Stored transition (pos, curType) is in parent's canonical frame; cur may
-    // be in a different one, so we search for (p,t) with
-    // canonical(stateSet(cur,p,t))==parent.
     bool foundStep = false;
     int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
     for (int p = 0; p < g_numPos && !foundStep; p++) {
@@ -1041,7 +1072,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
 
       uint32_t present = neighborPresent(cur, pos);
       for (int newType = 0; newType <= g_maxType[pos]; newType++) {
-        if (!FORWARD_TRANSITIONS[curType][newType])
+        if (!FORWARD_TRANSITIONS_SLIDING_WINDOW[curType][newType])
           continue;
         if (!canPlace(present, newType))
           continue;

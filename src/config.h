@@ -116,12 +116,12 @@ using StateType128 = uint128_simd;
 const int MAX_UNLOCKED_TYPE = 5;
 
 // Baseline generation: generate baselines for unlocked types in this range
-const int UNLOCKED_TYPE_START = 5; // First type to generate baseline for
+const int UNLOCKED_TYPE_START = 2; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 3; // First level to process
-const int LEVEL_END = 3;   // Last level to process (inclusive)
+const int LEVEL_START = 4; // First level to process
+const int LEVEL_END = 4;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {
@@ -132,6 +132,12 @@ inline int &getCurrentLevel() {
 // Reverse BFS (path reconstruction): number of threads per layer
 const int REVERSE_BFS_NUM_THREADS = 8;
 
+// When true, run forward BFS in parallel with reverse and meet in the middle
+// (finds shorter path, uses more memory). When false, only reverse BFS runs;
+// path is built by walking from final back to start (less memory, path may be
+// longer).
+const bool RUN_PARALLEL_FORWARD_BFS = false;
+
 // When true, path-finding bidirectional BFS starts from empty (all 0) instead
 // of all-blue (all 1). Can find more optimal paths (e.g. fewer placements).
 const bool PATH_FROM_EMPTY = false;
@@ -140,7 +146,8 @@ const bool PATH_FROM_EMPTY = false;
 // TRANSITIONS[fromType][toType] = true if (fromType → toType) is allowed.
 // Edit these to prune transitions that are never optimal.
 // The canPlace() neighbor check is still applied on top of these.
-//                                  empty  blue   red    green  yellow white
+//                empty  blue   red    green  yellow white
+// Normal forward BFS (and bidirectional forward): no downgrading from white.
 constexpr bool FORWARD_TRANSITIONS[6][6] = {
     /* empty  */ {false, true, true, true, true, true},
     /* blue   */ {false, false, true, true, true, true},
@@ -150,28 +157,37 @@ constexpr bool FORWARD_TRANSITIONS[6][6] = {
     /* white  */ {false, false, false, false, false, false},
 };
 
-constexpr bool BACKWARD_TRANSITIONS[6][6] = {
-    /* empty  */ {false, false, false, false, false, false},
-    /* blue   */ {false, false, false, false, false, false},
+// Sliding window only: allow white→1,2,3,4 so depth-limited BFS can tear down
+// and rebuild for better local optima.
+constexpr bool FORWARD_TRANSITIONS_SLIDING_WINDOW[6][6] = {
+    /* empty  */ {false, true, true, true, true, true},
+    /* blue   */ {false, false, true, true, true, true},
     /* red    */ {false, true, false, true, true, true},
     /* green  */ {false, true, true, false, true, true},
     /* yellow */ {false, true, true, true, false, true},
     /* white  */ {false, true, true, true, true, false},
 };
 
+constexpr bool BACKWARD_TRANSITIONS[6][6] = {
+    /* empty  */ {false, false, false, false, false, false},
+    /* blue   */ {false, false, true, true, true, false},
+    /* red    */ {false, true, false, true, true, false},
+    /* green  */ {false, true, true, false, true, false},
+    /* yellow */ {false, true, true, true, false, false},
+    /* white  */ {false, true, true, true, true, false},
+};
+
 constexpr bool BACKWARD_TRANSITIONS_EMPTY[6][6] = {
     /* empty  */ {false, false, false, false, false, false},
-    /* blue   */ {true, false, true, true, true, true},
-    /* red    */ {true, true, false, true, true, true},
-    /* green  */ {true, true, true, false, true, true},
-    /* yellow */ {true, true, true, true, false, true},
+    /* blue   */ {true, false, true, true, true, false},
+    /* red    */ {true, true, false, true, true, false},
+    /* green  */ {true, true, true, false, true, false},
+    /* yellow */ {true, true, true, true, false, false},
     /* white  */ {true, true, true, true, true, false},
 };
 
 // Sliding window parameters
 const int MAX_DEPTH = 10; // Maximum BFS depth per window
-const int SCAFFOLD_DEPTH =
-    10; // Maximum BFS depth for scaffold search during path reconstruction
 
 const int KERNEL_INDEX = 2; // Select which kernel to use
 
