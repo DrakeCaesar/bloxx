@@ -83,6 +83,26 @@ inline StateType canonical(StateType s) {
   return best;
 }
 
+// Returns {canonical(s), child_pos} where child_pos is where position `pos`
+// ends up after the canonical permutation.  Used when building a Transition so
+// we can store only (child_pos, prev_type) instead of the full parent state.
+inline pair<StateType, int> canonicalAndChildPos(StateType s, int pos) {
+  if (g_numSymm == 1)
+    return {s, pos};
+  StateType best = s;
+  int bestK = 0;
+  for (int k = 1; k < g_numSymm; k++) {
+    StateType t = applyPerm(s, g_symmPerm[k]);
+    if (t < best) {
+      best = t;
+      bestK = k;
+      if (best == g_baseState)
+        break;
+    }
+  }
+  return {best, g_symmPerm[bestK][pos]};
+}
+
 static void buildSymmetries() {
   int R = GRID.rows, C = GRID.cols;
   // All 8 elements of the dihedral group D4:
@@ -383,8 +403,10 @@ inline void printBuildPath(StateType bestState, const MapType &visited) {
   StateType cur = bestState;
   while (visited.at(cur).getPos() != -1) {
     const auto &tr = visited.at(cur);
-    steps.push_back({tr.getPos(), tr.getType()});
-    cur = tr.parent;
+    int childPos = tr.getPos();
+    int newType = stateGet(cur, childPos);
+    steps.push_back({childPos, newType});
+    cur = canonical(stateSet(cur, childPos, tr.getType()));
   }
   reverse(steps.begin(), steps.end());
   if (PATH_FROM_EMPTY)
@@ -414,7 +436,7 @@ bfsShortestPath(StateType target) {
   size_t head = 0;
 
   StateType bfsStart = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
-  path[bfsStart] = {bfsStart, -1, -1};
+  path[bfsStart] = {};
   q.push_back({bfsStart, 0});
 
   while (head < q.size()) {
@@ -429,9 +451,10 @@ bfsShortestPath(StateType target) {
           continue;
         if (!canPlace(present, newType))
           continue;
-        StateType next = canonical(stateSet(cur, pos, newType));
+        auto [next, childPos] =
+            canonicalAndChildPos(stateSet(cur, pos, newType), pos);
         auto [it, inserted] = path.try_emplace(
-            next, Transition{cur, (int8_t)pos, (int8_t)newType});
+            next, Transition{(int8_t)childPos, (int8_t)curType});
         if (inserted)
           q.push_back({next, curScore + (newType - curType)});
       }
@@ -523,7 +546,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       auto it = parentMap.find(cur);
       if (it == parentMap.end() || it->second.getPos() == -1)
         continue;
-      StateType parent = it->second.parent;
+      StateType parent =
+          canonical(stateSet(cur, it->second.getPos(), it->second.getType()));
       if (parentMap.count(parent) && pruned.find(parent) == pruned.end()) {
         pruned[parent] = parentMap.find(parent)->second;
         worklist.push_back({parent, countTowersLeft(parent)});
@@ -537,10 +561,10 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   std::deque<QueueEntry> qReverse;
   std::deque<QueueEntry> qForward;
   if (RUN_PARALLEL_FORWARD_BFS) {
-    parentForward[pathStartState] = {pathStartState, -1, -1};
+    parentForward[pathStartState] = {};
     qForward.push_back({pathStartState, countTowersLeft(pathStartState)});
   }
-  parentReverse[finalState] = {finalState, -1, -1};
+  parentReverse[finalState] = {};
   qReverse.push_back({finalState, countTowersLeft(finalState)});
 
   std::mutex coutMutex;
@@ -584,11 +608,15 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
           if (!backTable[curType][prevType])
             continue;
-          StateType next = canonical(stateSet(cur, pos, prevType));
+          auto [next, childPos] =
+              canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
           int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
                            (prevType != reverseBaseType ? 1 : 0);
-          out->push_back({next, Transition{cur, (int8_t)pos, (int8_t)curType},
-                          nextTowers});
+          // child_pos is in next's canonical space; curType is what next's
+          // position becomes when going forward: canonical(stateSet(next,
+          // childPos, curType)) == cur.
+          out->push_back(
+              {next, Transition{(int8_t)childPos, (int8_t)curType}, nextTowers});
         }
       }
     }
@@ -750,10 +778,11 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
               continue;
             if (!canPlace(present, newType))
               continue;
-            StateType next = canonical(stateSet(cur, pos, newType));
+            auto [next, childPos] =
+                canonicalAndChildPos(stateSet(cur, pos, newType), pos);
             if (parentForward
                     .emplace(next,
-                             Transition{cur, (int8_t)pos, (int8_t)newType})
+                             Transition{(int8_t)childPos, (int8_t)curType})
                     .second) {
               int nextTowers = curTowers -
                                (curType != reverseBaseType ? 1 : 0) +
@@ -846,7 +875,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     }
     StateType cur = pathStartState;
     while (cur != finalState) {
-      StateType parent = parentReverse.at(cur).parent;
+      const auto &tr = parentReverse.at(cur);
+      StateType parent =
+          canonical(stateSet(cur, tr.getPos(), tr.getType()));
       bool foundStep = false;
       int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
       for (int p = 0; p < g_numPos && !foundStep; p++) {
@@ -869,7 +900,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     int d = 0;
     StateType cur = s;
     while (parentForward.count(cur) && parentForward.at(cur).getPos() != -1) {
-      cur = parentForward.at(cur).parent;
+      const auto &tr = parentForward.at(cur);
+      cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
       d++;
     }
     return d;
@@ -878,7 +910,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     int d = 0;
     StateType cur = s;
     while (parentReverse.count(cur) && parentReverse.at(cur).getPos() != -1) {
-      cur = parentReverse.at(cur).parent;
+      const auto &tr = parentReverse.at(cur);
+      cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
       d++;
     }
     return d;
@@ -919,30 +952,38 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   }
 
   vector<pair<int, int>> stepsForward;
-  StateType cur = meetState;
-  while (parentForward.at(cur).getPos() != -1) {
-    const auto &tr = parentForward.at(cur);
-    stepsForward.push_back({tr.getPos(), tr.getType()});
-    cur = tr.parent;
+  {
+    StateType cur = meetState;
+    while (parentForward.at(cur).getPos() != -1) {
+      const auto &tr = parentForward.at(cur);
+      int childPos = tr.getPos();
+      int newType = stateGet(cur, childPos);
+      stepsForward.push_back({childPos, newType});
+      cur = canonical(stateSet(cur, childPos, tr.getType()));
+    }
   }
   reverse(stepsForward.begin(), stepsForward.end());
 
-  cur = meetState;
-  while (parentReverse.at(cur).getPos() != -1) {
-    StateType parent = parentReverse.at(cur).parent;
-    bool foundStep = false;
-    int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
-    for (int p = 0; p < g_numPos && !foundStep; p++) {
-      for (int t = stepTypeMin; t <= g_maxType[p] && !foundStep; t++) {
-        if (t == stateGet(cur, p))
-          continue;
-        if (canonical(stateSet(cur, p, t)) == parent) {
-          steps.push_back({p, t});
-          foundStep = true;
+  {
+    StateType cur = meetState;
+    while (parentReverse.at(cur).getPos() != -1) {
+      const auto &tr = parentReverse.at(cur);
+      StateType parent =
+          canonical(stateSet(cur, tr.getPos(), tr.getType()));
+      bool foundStep = false;
+      int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
+      for (int p = 0; p < g_numPos && !foundStep; p++) {
+        for (int t = stepTypeMin; t <= g_maxType[p] && !foundStep; t++) {
+          if (t == stateGet(cur, p))
+            continue;
+          if (canonical(stateSet(cur, p, t)) == parent) {
+            steps.push_back({p, t});
+            foundStep = true;
+          }
         }
       }
+      cur = parent;
     }
-    cur = parent;
   }
 
   steps.insert(steps.begin(), stepsForward.begin(), stepsForward.end());
@@ -1274,7 +1315,7 @@ void runSingleLevel() {
     size_t head = 0;
 
     StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
-    visited[startState] = {startState, -1, -1};
+    visited[startState] = {};
     q.push_back({startState, 0});
 
     result.bestState = startState;
@@ -1301,10 +1342,11 @@ void runSingleLevel() {
           if (!canPlace(present, newType))
             continue;
 
-          StateType next = canonical(stateSet(cur, pos, newType));
+          auto [next, childPos] =
+              canonicalAndChildPos(stateSet(cur, pos, newType), pos);
           int nextScore = curScore + (newType - curType);
           auto [it, inserted] = visited.try_emplace(
-              next, Transition{cur, (int8_t)pos, (int8_t)newType});
+              next, Transition{(int8_t)childPos, (int8_t)curType});
           if (inserted)
             q.push_back({next, nextScore});
         }

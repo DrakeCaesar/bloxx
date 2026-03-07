@@ -1,17 +1,23 @@
 #pragma once
 
-#include "config.h"
+#include <cstdint>
 
 // ── Path reconstruction transition ───────────────────────────────────────────
-// Transition struct optimized for board size
-// For grids ≤52 positions: pack pos (6 bits) + type (3 bits) + sentinel into
-// uint16_t. This reduces Transition size and improves cache utilization.
+// Stores only (child_pos, prev_type) — no parent state pointer needed.
+//
+// child_pos  = position index in the *child's* canonical state that changed.
+// prev_type  = the type at child_pos in the parent (what we revert to).
+//
+// Parent recovery: canonical(stateSet(child, child_pos, prev_type))
+// Proof: stateSet(child, child_pos, prev_type) == applyPerm(parent, k) for the
+// symmetry k that mapped parent→child, so canonicalizing gives back parent. ✓
+//
+// Memory: 2 bytes vs. 32 bytes (16-byte-aligned StateType + padding) — ~16x.
 struct Transition {
-  StateType parent;
-  uint16_t packed; // bits 0-5: pos (0-63, 63=sentinel), bits 6-8: type (0-5)
+  uint16_t packed; // bits 0-5: child_pos (0-62, 63=sentinel), bits 6-8: prev_type
 
-  Transition(StateType p = 0, int8_t pos = -1, int8_t type = 0)
-      : parent(p), packed((pos == -1 ? 63 : pos) | (type << 6)) {}
+  Transition(int8_t child_pos = -1, int8_t prev_type = 0)
+      : packed((child_pos == -1 ? 63 : child_pos) | (prev_type << 6)) {}
 
   int8_t getPos() const { return (packed & 0x3F) == 63 ? -1 : (packed & 0x3F); }
   int8_t getType() const { return (packed >> 6) & 0x7; }
