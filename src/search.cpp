@@ -439,12 +439,11 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   const int kPruneLowDelta = 3;
   const int kPruneHighDelta = 3;
 
-  // Tower count for pruning: non-empty when PATH_FROM_EMPTY, non-blue otherwise
-  auto countTowersLeft = [pathStartState](StateType s) {
+  auto countTowersLeft = [](StateType s) {
     int towersLeft = 0;
-    int targetType = PATH_FROM_EMPTY ? 0 : 1;
+    const int bt = PATH_FROM_EMPTY ? 0 : 1;
     for (int pos = 0; pos < g_numPos; pos++) {
-      if (stateGet(s, pos) != targetType)
+      if (stateGet(s, pos) != bt)
         towersLeft++;
     }
     return towersLeft;
@@ -540,8 +539,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   // Expand a range of (cur, curTowers) into a list of new states (no shared map
   // writes).
-  const int reverseSkipType = PATH_FROM_EMPTY ? 0 : 1;
   const int reversePrevMin = PATH_FROM_EMPTY ? 0 : 1;
+  const int baseType = PATH_FROM_EMPTY ? 0 : 1;
 
   auto reverseExpandChunk = [&](const QueueEntry *start, const QueueEntry *end,
                                 vector<ReverseExpansion> *out) {
@@ -552,19 +551,17 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         continue;
       for (int pos = 0; pos < g_numPos; pos++) {
         int curType = stateGet(cur, pos);
-        if (curType == reverseSkipType)
-          continue;
         uint32_t present = neighborPresent(cur, pos);
         if (!canPlace(present, curType))
           continue;
-        for (int prevType = reversePrevMin; prevType <= g_maxType[pos];
+        for (int prevType = reversePrevMin; prevType <= min(g_maxType[pos], 4);
              prevType++) {
           if (prevType == curType)
             continue;
           StateType next = canonical(stateSet(cur, pos, prevType));
           int nextTowers =
-              curTowers - (curType != reverseSkipType ? 1 : 0) +
-              (prevType != reverseSkipType ? 1 : 0);
+              curTowers - (curType != baseType ? 1 : 0) +
+              (prevType != baseType ? 1 : 0);
           out->push_back({next, Transition{cur, (int8_t)pos, (int8_t)curType},
                           nextTowers});
         }

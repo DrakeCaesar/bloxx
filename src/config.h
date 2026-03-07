@@ -120,8 +120,8 @@ const int UNLOCKED_TYPE_START = 2; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 1; // First level to process
-const int LEVEL_END = 1;   // Last level to process (inclusive)
+const int LEVEL_START = 3; // First level to process
+const int LEVEL_END = 5;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {
@@ -134,7 +134,7 @@ const int REVERSE_BFS_NUM_THREADS = 8;
 
 // When true, path-finding bidirectional BFS starts from empty (all 0) instead
 // of all-blue (all 1). Can find more optimal paths (e.g. fewer placements).
-const bool PATH_FROM_EMPTY = true;
+const bool PATH_FROM_EMPTY = false;
 
 // Sliding window parameters
 const int MAX_DEPTH = 10; // Maximum BFS depth per window
