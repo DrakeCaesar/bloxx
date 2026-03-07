@@ -3,7 +3,7 @@ Reverse BFS visited 5464 states (map size after pruning: 5465).
 
 --- Build path (18 steps) ---
 
-Start (empty board):
+Start (all blue board):
   [90m▐[0m[100m[90m·[0m[90m[100m▐[0m[100m[90m·[0m[90m▌[0m  
 [90m▐[0m[100m[90m·[0m[90m[100m▐[0m[100m[90m·[0m[90m[100m▐[0m[100m[90m·[0m[90m[100m▐[0m[100m[90m·[0m[90m▌[0m
 [90m▐[0m[100m[90m·[0m[90m[100m▐[0m[100m[90m·[0m[90m[100m▐[0m[100m[90m·[0m[90m[100m▐[0m[100m[90m·[0m[90m▌[0m
