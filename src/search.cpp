@@ -23,13 +23,59 @@ using namespace std;
 ofstream *g_baselineFile = nullptr;
 streambuf *g_originalCoutBuf = nullptr;
 
-// Hash specialization for uint128_simd (must be after including config.h)
+// ── Packed-transition embedding ──────────────────────────────────────────────
+// Level 5 uses at most 102 bits of the 128-bit state, so bits 120-127 (the top
+// byte of uint128_simd::u.hi) are always zero in a canonical state.  We store
+// the 8-bit Transition::packed there, turning every map<StateType,Transition>
+// into a set<StateType> — eliminating the value slot and its alignment padding.
+//
+//   sizeof(pair<uint128_simd, uint8_t>) = 32 bytes (16-byte alignment + 15 pad)
+//   sizeof(uint128_simd)               = 16 bytes   → 2× reduction per entry
+//
+// Encoding: top byte of hi = Transition::packed  (255 = sentinel / start node)
+// The queues and all pure-state operations (stateGet, canonical, …) are safe:
+//   • stateGet/stateSet only touch bits for positions 0-33 (max bit = 101)
+//   • canonical()'s applyPerm initialises result=0 and only writes positions
+//     0..numPos-1, so it naturally strips the packed byte → output is always a
+//     pure canonical state ready for a fresh encode.
+
+static constexpr uint64_t PACKED_HI_SHIFT = 56; // bit-offset within hi word
+// Mask that keeps all bits except the top byte of hi (i.e. keeps bits 0-119).
+static const StateType STATE_MASK =
+    StateType(0xFFFFFFFFFFFFFFFFull, 0x00FFFFFFFFFFFFFFull);
+
+inline StateType encodeTransition(StateType pureState, Transition tr) {
+  return pureState | StateType(0, (uint64_t)tr.packed << PACKED_HI_SHIFT);
+}
+inline Transition decodeTransition(StateType encoded) {
+  Transition t;
+  t.packed = static_cast<uint8_t>(encoded.u.hi >> PACKED_HI_SHIFT);
+  return t;
+}
+
+// ── Hash / equality that ignore the packed top byte ──────────────────────────
+// Used for all visited/parent sets so that find(pureState) matches any entry
+// with the same state bits regardless of what transition is encoded.
+
+struct StateHash {
+  size_t operator()(const StateType &x) const noexcept {
+    return size_t(x.u.lo ^ (x.u.hi & 0x00FFFFFFFFFFFFFFull));
+  }
+};
+struct StateEqual {
+  bool operator()(const StateType &a, const StateType &b) const noexcept {
+    return a.u.lo == b.u.lo &&
+           (a.u.hi & 0x00FFFFFFFFFFFFFFull) ==
+               (b.u.hi & 0x00FFFFFFFFFFFFFFull);
+  }
+};
+
+// Hash specialization for uint128_simd used by robin_hood containers.
+// Ignores the top byte (packed transition) so that pure-state lookups work.
 namespace robin_hood {
 template <> struct hash<uint128_simd> {
   size_t operator()(const uint128_simd &x) const noexcept {
-    uint64_t lo = (uint64_t)x;
-    uint64_t hi = (uint64_t)(x >> 64);
-    return size_t(lo ^ hi);
+    return size_t(x.u.lo ^ (x.u.hi & 0x00FFFFFFFFFFFFFFull));
   }
 };
 } // namespace robin_hood
@@ -397,12 +443,14 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
   cout << "\nReached score: " << reachedScore << "\n";
 }
 
-template <typename MapType>
-inline void printBuildPath(StateType bestState, const MapType &visited) {
+template <typename SetType>
+inline void printBuildPath(StateType bestState, const SetType &visited) {
   vector<pair<int, int>> steps; // (pos, newType)
   StateType cur = bestState;
-  while (visited.at(cur).getPos() != -1) {
-    const auto &tr = visited.at(cur);
+  while (true) {
+    auto tr = decodeTransition(*visited.find(cur));
+    if (tr.getPos() == -1)
+      break;
     int childPos = tr.getPos();
     int newType = stateGet(cur, childPos);
     steps.push_back({childPos, newType});
@@ -423,10 +471,11 @@ struct SearchResult {
 };
 
 // BFS from base state (all blue) stopping as soon as target is reached.
-// Returns a parent-pointer map containing the shortest path to target.
-inline robin_hood::unordered_map<StateType, Transition>
+// Returns a set of encoded states (transition packed into top byte) for path
+// reconstruction.
+inline robin_hood::unordered_set<StateType>
 bfsShortestPath(StateType target) {
-  robin_hood::unordered_map<StateType, Transition> path;
+  robin_hood::unordered_set<StateType> path;
   path.reserve(1ull << 24); // ~16M elements
   struct Entry {
     StateType state;
@@ -436,7 +485,7 @@ bfsShortestPath(StateType target) {
   size_t head = 0;
 
   StateType bfsStart = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
-  path[bfsStart] = {};
+  path.emplace(encodeTransition(bfsStart, {})); // sentinel: packed=255
   q.push_back({bfsStart, 0});
 
   while (head < q.size()) {
@@ -453,9 +502,9 @@ bfsShortestPath(StateType target) {
           continue;
         auto [next, childPos] =
             canonicalAndChildPos(stateSet(cur, pos, newType), pos);
-        auto [it, inserted] = path.try_emplace(
-            next, Transition{(int8_t)childPos, (int8_t)curType});
-        if (inserted)
+        if (path.emplace(encodeTransition(
+                             next, Transition{(int8_t)childPos, (int8_t)curType}))
+                .second)
           q.push_back({next, curScore + (newType - curType)});
       }
     }
@@ -469,9 +518,9 @@ bfsShortestPath(StateType target) {
 static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   const StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
 
-  ankerl::unordered_dense::map<StateType, Transition> parentReverse;
+  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> parentReverse;
   parentReverse.reserve(1ull << 26); // ~64M elements
-  ankerl::unordered_dense::map<StateType, Transition> parentForward;
+  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> parentForward;
   if (RUN_PARALLEL_FORWARD_BFS)
     parentForward.reserve(1ull << 26); // ~64M elements
 
@@ -533,23 +582,25 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       toProcess.push_back(*bestIt);
     }
 
-    using MapType = std::decay_t<decltype(parentMap)>;
-    MapType pruned;
+    using SetType = std::decay_t<decltype(parentMap)>;
+    SetType pruned;
     pruned.reserve(toProcess.size() * 4);
     for (const auto &entry : toProcess)
-      pruned[entry.first] = parentMap.at(entry.first);
+      pruned.emplace(*parentMap.find(entry.first));
 
     std::deque<QueueEntry> worklist(toProcess.begin(), toProcess.end());
     while (!worklist.empty()) {
       StateType cur = worklist.front().first;
       worklist.pop_front();
       auto it = parentMap.find(cur);
-      if (it == parentMap.end() || it->second.getPos() == -1)
+      if (it == parentMap.end())
         continue;
-      StateType parent =
-          canonical(stateSet(cur, it->second.getPos(), it->second.getType()));
+      auto tr = decodeTransition(*it);
+      if (tr.getPos() == -1)
+        continue;
+      StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
       if (parentMap.count(parent) && pruned.find(parent) == pruned.end()) {
-        pruned[parent] = parentMap.find(parent)->second;
+        pruned.emplace(*parentMap.find(parent));
         worklist.push_back({parent, countTowersLeft(parent)});
       }
     }
@@ -561,10 +612,10 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   std::deque<QueueEntry> qReverse;
   std::deque<QueueEntry> qForward;
   if (RUN_PARALLEL_FORWARD_BFS) {
-    parentForward[pathStartState] = {};
+    parentForward.emplace(encodeTransition(pathStartState, {}));
     qForward.push_back({pathStartState, countTowersLeft(pathStartState)});
   }
-  parentReverse[finalState] = {};
+  parentReverse.emplace(encodeTransition(finalState, {}));
   qReverse.push_back({finalState, countTowersLeft(finalState)});
 
   std::mutex coutMutex;
@@ -579,11 +630,10 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   // canonical(stateSet(cur, p, t)) == parent because canonical frames may
   // differ.
 
-  // Result of expanding one state in reverse: (next state, transition, next
-  // tower count).
+  // Result of expanding one state in reverse: (next state with transition
+  // embedded in its top byte, next tower count).
   struct ReverseExpansion {
-    StateType next;
-    Transition trans;
+    StateType next; // canonical pure state | (Transition.packed << 120)
     int nextTowers;
   };
 
@@ -612,11 +662,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
               canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
           int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
                            (prevType != reverseBaseType ? 1 : 0);
-          // child_pos is in next's canonical space; curType is what next's
-          // position becomes when going forward: canonical(stateSet(next,
-          // childPos, curType)) == cur.
           out->push_back(
-              {next, Transition{(int8_t)childPos, (int8_t)curType}, nextTowers});
+              {encodeTransition(next, Transition{(int8_t)childPos, (int8_t)curType}),
+               nextTowers});
         }
       }
     }
@@ -691,12 +739,12 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       for (auto &t : revThreads)
         t.join();
 
-      // Merge into shared map and queue (single-threaded, dedup via emplace).
+      // Merge into shared set and queue (single-threaded, dedup via emplace).
       for (int c = 0; c < numThreads; c++) {
         for (const auto &r : results[c]) {
-          if (parentReverse.emplace(r.next, r.trans).second) {
+          if (parentReverse.emplace(r.next).second) {
             totalReverseVisited++;
-            qReverse.push_back({r.next, r.nextTowers});
+            qReverse.push_back({r.next & STATE_MASK, r.nextTowers});
           }
         }
       }
@@ -781,13 +829,13 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
             auto [next, childPos] =
                 canonicalAndChildPos(stateSet(cur, pos, newType), pos);
             if (parentForward
-                    .emplace(next,
-                             Transition{(int8_t)childPos, (int8_t)curType})
+                    .emplace(encodeTransition(
+                        next, Transition{(int8_t)childPos, (int8_t)curType}))
                     .second) {
               int nextTowers = curTowers -
                                (curType != reverseBaseType ? 1 : 0) +
                                (newType != reverseBaseType ? 1 : 0);
-              qForward.push_back({next, nextTowers});
+              qForward.push_back({next & STATE_MASK, nextTowers});
             }
           }
         }
@@ -865,8 +913,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   vector<pair<int, int>> steps;
 
   if (!RUN_PARALLEL_FORWARD_BFS) {
-    // parentReverse[state].parent = state we came from (toward final). So walk
-    // from pathStartState toward finalState to get steps in build order.
+    // Walk from pathStartState toward finalState following the reverse BFS tree.
     if (parentReverse.count(pathStartState) == 0) {
       lock_guard<mutex> lock(coutMutex);
       cout << "[Main] Reverse BFS did not reach path start. Cannot build path."
@@ -875,9 +922,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     }
     StateType cur = pathStartState;
     while (cur != finalState) {
-      const auto &tr = parentReverse.at(cur);
-      StateType parent =
-          canonical(stateSet(cur, tr.getPos(), tr.getType()));
+      auto tr = decodeTransition(*parentReverse.find(cur));
+      StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
       bool foundStep = false;
       int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
       for (int p = 0; p < g_numPos && !foundStep; p++) {
@@ -895,12 +941,14 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     return steps;
   }
 
-  // Meet-in-the-middle: find best intercept and build path from both maps.
+  // Meet-in-the-middle: find best intercept and build path from both sets.
   auto forwardDepthOf = [&parentForward](StateType s) {
     int d = 0;
     StateType cur = s;
-    while (parentForward.count(cur) && parentForward.at(cur).getPos() != -1) {
-      const auto &tr = parentForward.at(cur);
+    while (parentForward.count(cur)) {
+      auto tr = decodeTransition(*parentForward.find(cur));
+      if (tr.getPos() == -1)
+        break;
       cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
       d++;
     }
@@ -909,8 +957,10 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   auto reverseDepthOf = [&parentReverse](StateType s) {
     int d = 0;
     StateType cur = s;
-    while (parentReverse.count(cur) && parentReverse.at(cur).getPos() != -1) {
-      const auto &tr = parentReverse.at(cur);
+    while (parentReverse.count(cur)) {
+      auto tr = decodeTransition(*parentReverse.find(cur));
+      if (tr.getPos() == -1)
+        break;
       cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
       d++;
     }
@@ -920,8 +970,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   StateType meetState = pathStartState;
   int bestTotal = INT_MAX;
   size_t interceptCount = 0;
-  for (const auto &kv : parentForward) {
-    StateType s = kv.first;
+  for (const auto &elem : parentForward) {
+    StateType s = elem & STATE_MASK;
     if (parentReverse.count(s) == 0)
       continue;
     interceptCount++;
@@ -954,8 +1004,10 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   vector<pair<int, int>> stepsForward;
   {
     StateType cur = meetState;
-    while (parentForward.at(cur).getPos() != -1) {
-      const auto &tr = parentForward.at(cur);
+    while (true) {
+      auto tr = decodeTransition(*parentForward.find(cur));
+      if (tr.getPos() == -1)
+        break;
       int childPos = tr.getPos();
       int newType = stateGet(cur, childPos);
       stepsForward.push_back({childPos, newType});
@@ -966,10 +1018,11 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   {
     StateType cur = meetState;
-    while (parentReverse.at(cur).getPos() != -1) {
-      const auto &tr = parentReverse.at(cur);
-      StateType parent =
-          canonical(stateSet(cur, tr.getPos(), tr.getType()));
+    while (true) {
+      auto tr = decodeTransition(*parentReverse.find(cur));
+      if (tr.getPos() == -1)
+        break;
+      StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
       bool foundStep = false;
       int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
       for (int p = 0; p < g_numPos && !foundStep; p++) {
@@ -1300,7 +1353,7 @@ void runSingleLevel() {
   buildSymmetries();
 
   SearchResult result{g_baseState, 0, 0, 0};
-  robin_hood::unordered_map<StateType, Transition> visited;
+  robin_hood::unordered_set<StateType> visited;
   visited.reserve(1ull << 24); // ~16M elements
 
   if (SEARCH_MODE == 1) {
@@ -1315,7 +1368,7 @@ void runSingleLevel() {
     size_t head = 0;
 
     StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
-    visited[startState] = {};
+    visited.emplace(encodeTransition(startState, {})); // sentinel
     q.push_back({startState, 0});
 
     result.bestState = startState;
@@ -1345,9 +1398,10 @@ void runSingleLevel() {
           auto [next, childPos] =
               canonicalAndChildPos(stateSet(cur, pos, newType), pos);
           int nextScore = curScore + (newType - curType);
-          auto [it, inserted] = visited.try_emplace(
-              next, Transition{(int8_t)childPos, (int8_t)curType});
-          if (inserted)
+          if (visited
+                  .emplace(encodeTransition(
+                      next, Transition{(int8_t)childPos, (int8_t)curType}))
+                  .second)
             q.push_back({next, nextScore});
         }
       }
