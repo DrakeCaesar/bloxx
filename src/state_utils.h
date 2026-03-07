@@ -5,7 +5,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 // State packing utilities
 // ════════════════════════════════════════════════════════════════════════════
-// Each position stores a value 0-4 (fits in 3 bits).
+// Each position stores a value 0-5 (0=empty, 1-5=tower types, fits in 3 bits).
 // Up to 21 positions × 3 bits = 63 bits → fits in uint64_t.
 
 inline StateType stateSet(StateType s, int pos, int val) {

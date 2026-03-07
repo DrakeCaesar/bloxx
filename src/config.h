@@ -12,7 +12,7 @@ using namespace std;
 // ════════════════════════════════════════════════════════════════════════════
 // State Type Selection (based on grid size)
 // ════════════════════════════════════════════════════════════════════════════
-// Each position needs 3 bits (types 0-4). 128-bit → 42 positions max.
+// Each position needs 3 bits (types 0-5, 0=empty). 128-bit → 42 positions max.
 
 // Windows (MSVC or Clang): 128-bit state in __m128i (SSE2/AVX2), passed in XMM
 // for stable ABI.
@@ -112,13 +112,13 @@ using StateType128 = uint128_simd;
 // 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 =
 // Sliding Window
 [[maybe_unused]] const int SEARCH_MODE = 3;
-// Maximum tower type unlocked (0=Blue, 1=Red, 2=Green, 3=Yellow, 4=White)
-// Set to 4 for all towers unlocked, 2 for only Blue/Red/Green, etc.
-const int MAX_UNLOCKED_TYPE = 4;
+// Maximum tower type unlocked (1=Blue, 2=Red, 3=Green, 4=Yellow, 5=White)
+// Set to 5 for all towers unlocked, 3 for only Blue/Red/Green, etc.
+const int MAX_UNLOCKED_TYPE = 5;
 
 // Baseline generation: generate baselines for unlocked types in this range
-const int UNLOCKED_TYPE_START = 4; // First type to generate baseline for
-const int UNLOCKED_TYPE_END = 4;   // Last type to generate baseline for
+const int UNLOCKED_TYPE_START = 5; // First type to generate baseline for
+const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
 const int LEVEL_START = 3; // First level to process
@@ -181,14 +181,17 @@ using StateType = StateType128;
 using StateType = StateType128;
 
 // ANSI color codes and display configuration
+// Index 0 = empty, 1-5 = tower types
 const string COLORS[] = {
-    "\033[44m", // Blue background   - type 0
-    "\033[41m", // Red background    - type 1
-    "\033[42m", // Green background  - type 2
-    "\033[43m", // Yellow background - type 3
-    "\033[47m"  // White background  - type 4
+    "\033[100m", // Grey background   - type 0 (empty)
+    "\033[44m",  // Blue background   - type 1
+    "\033[41m",  // Red background    - type 2
+    "\033[42m",  // Green background  - type 3
+    "\033[43m",  // Yellow background - type 4
+    "\033[47m"   // White background  - type 5
 };
-const string COLOR_NAMES[] = {"Blue", "Red", "Green", "Yellow", "White"};
+const string COLOR_NAMES[] = {"Empty", "Blue",   "Red",
+                              "Green", "Yellow", "White"};
 const string RESET = "\033[0m";
 const string BLACK_TEXT = "\033[30m"; // Black text for number
 const string EMPTY_BG =
@@ -197,10 +200,12 @@ const string EMPTY_FG =
     "\033[90m"; // Grey foreground - empty position (grey bg + grey fg)
 
 // ANSI foreground colors for half-block separators (3x codes)
+// Index 0 = empty, 1-5 = tower types
 const string FG_COLORS[] = {
-    "\033[34m", // Blue foreground   - type 0
-    "\033[31m", // Red foreground    - type 1
-    "\033[32m", // Green foreground  - type 2
-    "\033[33m", // Yellow foreground - type 3
-    "\033[37m"  // White foreground  - type 4
+    "\033[90m", // Grey foreground   - type 0 (empty)
+    "\033[34m", // Blue foreground   - type 1
+    "\033[31m", // Red foreground    - type 2
+    "\033[32m", // Green foreground  - type 3
+    "\033[33m", // Yellow foreground - type 4
+    "\033[37m"  // White foreground  - type 5
 };

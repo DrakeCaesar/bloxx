@@ -51,7 +51,7 @@ int main() {
       outFile.close();
 
       // Print progress to console
-      cout << "✓ Level " << level << " (unlocked: 0-" << unlockedType
+      cout << "✓ Level " << level << " (unlocked: 1-" << unlockedType
            << ") complete → " << filename << "\n";
     }
   }

@@ -126,14 +126,16 @@ Four search modes available (configure in config.h):
 
 ### Placement Rules & Game Logic
 
-Tower placement follows dependency rules verified by `canPlace()`:
-- **Type 0 (Blue)**: Can be placed anywhere (no requirements)
-- **Type 1 (Red)**: Requires at least one Type 0 neighbor
-- **Type 2 (Green)**: Requires at least one Type 0 AND one Type 1 neighbor
-- **Type 3 (Yellow)**: Requires Types 0, 1, and 2 neighbors
-- **Type 4 (White)**: Requires all lower types (0-3) as neighbors
+Tower types are numbered 1-5 (0 = empty/unplaced). The board starts from all type 1 (Blue).
 
-Score = sum of all tower types on grid (max type = 4 per position)
+Tower placement follows dependency rules verified by `canPlace()`:
+- **Type 1 (Blue)**: Can be placed anywhere (no requirements)
+- **Type 2 (Red)**: Requires at least one Type 1 neighbor
+- **Type 3 (Green)**: Requires at least one Type 1 AND one Type 2 neighbor
+- **Type 4 (Yellow)**: Requires Types 1, 2, and 3 neighbors
+- **Type 5 (White)**: Requires all lower types (1-4) as neighbors
+
+Score = sum of (type - 1) for all positions (max type = 5 per position)
 
 `neighborPresent()` computes bitmask once per (state, position) for efficiency
 
@@ -144,7 +146,7 @@ Score = sum of all tower types on grid (max type = 4 per position)
 **Grid & Search**:
 - `LEVEL`: Grid level 1-5 for single-level runs (currently overridden for multi-level)
 - `SEARCH_MODE`: Algorithm selector (0=BFS, 1=DFS, 2=IDDFS, 3=Sliding Window)
-- `MAX_UNLOCKED_TYPE`: Max tower type available (0-4, or 4 for all towers)
+- `MAX_UNLOCKED_TYPE`: Max tower type available (1-5, or 5 for all towers)
 - `KERNEL_INDEX`: Selects window kernel pattern (0-5, see patterns below)
 
 **Sliding Window**:
@@ -204,7 +206,7 @@ Score = sum of all tower types on grid (max type = 4 per position)
 
 **When Modifying**:
 - **State type**: Currently forced to 128-bit (`StateType = StateType128`) for multi-level support. Uncomment preprocessor selection for single-level optimization.
-- **Bit packing**: 3 bits/position × 42 positions = 126 bits max. Changing tower types requires updating all shift/mask logic.
+- **Bit packing**: 3 bits/position × 42 positions = 126 bits max (values 0-5; 0=empty, 1-5=tower types). Changing tower types requires updating all shift/mask logic.
 - **Grid patterns**: Use `createGridFromPattern()` with '.' for valid positions
 - **New levels**: Add to switch statement in `createGrid()` and recompute baselines
 - **Symmetry**: Always canonicalize states before storing/looking up

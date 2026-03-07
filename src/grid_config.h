@@ -36,16 +36,17 @@ struct GridConfig {
     }
   }
 
-  void computeMaxTypes(int maxUnlockedType = 4) {
+  void computeMaxTypes(int maxUnlockedType = 5) {
     maxType.clear();
     maxType.resize(numPositions());
     for (int i = 0; i < numPositions(); i++) {
       // Max type is limited by: neighbors available AND towers unlocked
-      maxType[i] = min(maxUnlockedType, min(4, (int)neighbors[i].size()));
+      // Type T needs types 1..T-1 as neighbors, so N neighbors → max type N+1
+      maxType[i] = min(maxUnlockedType, min(5, (int)neighbors[i].size() + 1));
     }
   }
 
-  void build(int maxUnlockedType = 4) {
+  void build(int maxUnlockedType = 5) {
     coordToIdx.clear();
     for (int i = 0; i < numPositions(); i++) {
       coordToIdx[positions[i]] = i;

@@ -8,7 +8,7 @@
 // uint16_t. This reduces Transition size and improves cache utilization.
 struct Transition {
   StateType parent;
-  uint16_t packed; // bits 0-5: pos (0-63, 63=sentinel), bits 6-8: type (0-4)
+  uint16_t packed; // bits 0-5: pos (0-63, 63=sentinel), bits 6-8: type (0-5)
 
   Transition(StateType p = 0, int8_t pos = -1, int8_t type = 0)
       : parent(p), packed((pos == -1 ? 63 : pos) | (type << 6)) {}

@@ -39,14 +39,16 @@ template <> struct hash<uint128_simd> {
 // loop. Max grid 7×7 = 49 positions, max 4 orthogonal neighbors each. Neighbor
 // bit-shifts are precomputed (neighborIndex * 3) to avoid multiplies in
 // canPlace. All positions are padded to exactly 4 entries; unused entries use
-// shift 63 which reads bits 63-65 of the uint64_t — always 0 (type 0), so they
-// never interfere with has[1..4] checks.
+// shift 63 which reads bits 63-65 of the uint64_t — always 0 (type 0/empty),
+// so they never set any bit that placement checks require (bits 1+).
 
 static int g_numPos;
 static int g_neighborShifts[49][4]; // precomputed: neighborIndex * 3
 static int g_neighborCount[49];
 static int g_maxType[49];
-static const uint32_t g_requiredMask[5] = {0, 1, 3, 7, 15}; // (1<<type)-1
+static StateType g_baseState; // all positions set to type 1 (Blue)
+// Type T requires neighbors of types 1..T-1: mask = bits 1..T-1 set
+static const uint32_t g_requiredMask[6] = {0, 0, 2, 6, 14, 30};
 
 // ── Symmetry ────────────────────────────────────────────────────────────────
 // Auto-detects valid symmetries by trying all 8 dihedral transforms against
@@ -74,8 +76,8 @@ inline StateType canonical(StateType s) {
     StateType t = applyPerm(s, g_symmPerm[k]);
     if (t < best) {
       best = t;
-      if (best == StateType(0))
-        return StateType(0); // Early exit: can't get smaller than 0
+      if (best == g_baseState)
+        return g_baseState; // Early exit: can't get smaller than all-blue
     }
   }
   return best;
@@ -133,10 +135,13 @@ static void buildLookupTables() {
     for (int j = count; j < 4; j++)
       g_neighborShifts[i][j] = 63; // safe padding: reads always-zero bits
   }
+  g_baseState = StateType(0);
+  for (int i = 0; i < g_numPos; i++)
+    g_baseState = stateSet(g_baseState, i, 1);
 }
 
 // ── Placement rule ───────────────────────────────────────────────────────────
-// Tower of type T at pos requires one neighbor of each type 0..T-1.
+// Tower of type T at pos requires one neighbor of each type 1..T-1.
 // neighborPresent() computes the bitmask once per (state, pos); canPlace()
 // then checks it cheaply for each candidate type.
 
@@ -150,7 +155,7 @@ inline uint32_t neighborPresent(StateType state, int pos) {
 }
 
 inline bool canPlace(uint32_t present, int type) {
-  if (type == 0)
+  if (type <= 1)
     return true;
   return (present & g_requiredMask[type]) == g_requiredMask[type];
 }
@@ -158,22 +163,20 @@ inline bool canPlace(uint32_t present, int type) {
 // ── Path reconstruction helpers ──────────────────────────────────────────────
 static int scoreGrid(StateType state) {
   int score = 0;
-  for (int i = 0; i < g_numPos; i++) {
-    int type = stateGet(state, i);
-    score += type;
-  }
+  for (int i = 0; i < g_numPos; i++)
+    score += stateGet(state, i) - 1;
   return score;
 }
 
-// expandPathForEmptyBoard: converts a path from the solver's "all zeros = blue"
+// expandPathForEmptyBoard: converts a path from the solver's "all-1 = blue"
 // model to a path that starts from a truly empty board.
 //
 // For each step (pos, newType), before we can upgrade pos, we need:
 //   1. pos itself to be explicitly placed (as blue) if not already
-//   2. For each required neighbor type 0..newType-1, at least one neighbor
+//   2. For each required neighbor type 1..newType-1, at least one neighbor
 //      must be explicitly placed with that type.
-//      - Neighbors with type > 0 were placed by earlier explicit steps.
-//      - Neighbors with type == 0 are "implicit blue" and need an explicit
+//      - Neighbors with type > 1 were placed by earlier explicit steps.
+//      - Neighbors with type == 1 are "implicit blue" and need an explicit
 //        "place blue" step inserted here.
 //
 // Tracks a physical (non-canonical) state so neighbor lookups against
@@ -183,14 +186,14 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
   vector<pair<int, int>> out;
   out.reserve(steps.size() * 2);
   uint64_t placed = 0; // bit i = position i has been explicitly placed
-  StateType phys = 0; // canonical state — mirrors what printExpandedPath tracks
+  StateType phys = g_baseState; // canonical state — mirrors what printExpandedPath tracks
 
   for (auto [pos, newType] : steps) {
-    // For each required neighbor type req in 0..newType-1,
+    // For each required neighbor type req in 1..newType-1,
     // ensure at least one placed neighbor has that type.
-    // Unplaced neighbors with type 0 are "implicit blue" in the solver model;
+    // Unplaced neighbors with type 1 are "implicit blue" in the solver model;
     // insert an explicit place-blue step for one such neighbor if needed.
-    for (int req = 0; req < newType; req++) {
+    for (int req = 1; req < newType; req++) {
       bool satisfied = false;
       int candidateNb = -1;
       for (int nb : GRID.neighbors[pos]) {
@@ -199,16 +202,16 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
           if ((placed >> nb) & 1) {
             satisfied = true; // already explicitly placed with correct type
             break;
-          } else if (req == 0) {
-            // Implicit blue (unplaced, type 0) — can satisfy req=0 once placed
+          } else if (req == 1) {
+            // Implicit blue (unplaced, type 1) — can satisfy req=1 once placed
             candidateNb = nb;
           }
         }
       }
       if (!satisfied && candidateNb != -1) {
-        out.push_back({candidateNb, 0});
+        out.push_back({candidateNb, 1});
         placed |= (1ull << candidateNb);
-        // Blue placements don't change canonical state (0 is already 0)
+        // Blue placements don't change canonical state (1 is already 1)
       }
     }
 
@@ -222,9 +225,9 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
 }
 
 static void printExpandedPath(const vector<pair<int, int>> &expandedSteps) {
-  StateType canonState = 0;   // canonical state — for validity checks
-  StateType displayState = 0; // physical state — stable orientation for display
-  uint64_t placedMask = 0;    // physical positions that have been placed
+  StateType canonState = g_baseState;   // canonical state — for validity checks
+  StateType displayState = g_baseState; // physical state — stable orientation for display
+  uint64_t placedMask = 0;              // physical positions that have been placed
 
   auto advanceState = [&](int pos, int newType) {
     int usedSymm = 0;
@@ -256,13 +259,13 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps) {
   int totalSteps = (int)expandedSteps.size() + missingCount;
 
   // Reset for actual print pass.
-  canonState = 0;
-  displayState = 0;
+  canonState = g_baseState;
+  displayState = g_baseState;
   placedMask = 0;
 
   cout << "\n--- Build path (" << totalSteps << " steps) ---\n\n";
   cout << "Start (empty board):\n";
-  printGrid(StateType(0), uint64_t(0));
+  printGrid(g_baseState, uint64_t(0));
   int validSteps = 0, invalidSteps = 0;
   int stepNum = 1;
 
@@ -323,12 +326,12 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps) {
   for (int i = 0; i < g_numPos; i++) {
     if (!((placedMask >> i) & 1)) {
       placedMask |= (1ull << i);
-      // displayState already has 0 (blue) at this position
+      // displayState already has 1 (blue) at this position
       auto [r, c] = GRID.positions[i];
       cout << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c
            << ")  ";
-      cout << "empty -> " << COLORS[0] << BLACK_TEXT << COLOR_NAMES[0] << RESET
-           << " (0)";
+      cout << "empty -> " << COLORS[1] << BLACK_TEXT << COLOR_NAMES[1] << RESET
+           << " (1)";
       cout << "  \033[32m\u2713\033[0m"
            << "\n";
       printGrid(displayState, placedMask);
@@ -368,7 +371,7 @@ struct SearchResult {
   size_t uniqueStates;
 };
 
-// BFS from state 0 stopping as soon as target is reached.
+// BFS from base state (all blue) stopping as soon as target is reached.
 // Returns a parent-pointer map containing the shortest path to target.
 inline robin_hood::unordered_map<StateType, Transition>
 bfsShortestPath(StateType target) {
@@ -381,8 +384,8 @@ bfsShortestPath(StateType target) {
   vector<Entry> q;
   size_t head = 0;
 
-  path[0] = {0, -1, -1};
-  q.push_back({0, 0});
+  path[g_baseState] = {g_baseState, -1, -1};
+  q.push_back({g_baseState, 0});
 
   while (head < q.size()) {
     auto [cur, curScore] = q[head++];
@@ -390,10 +393,10 @@ bfsShortestPath(StateType target) {
       break;
     for (int pos = 0; pos < g_numPos; pos++) {
       int curType = stateGet(cur, pos);
-      if (curType == 4)
-        continue; // Type 4 is never a requirement, no point downgrading
+      if (curType == 5)
+        continue;
       uint32_t present = neighborPresent(cur, pos);
-      for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+      for (int newType = 1; newType <= g_maxType[pos]; newType++) {
         if (newType == curType)
           continue;
         if (!canPlace(present, newType))
@@ -426,7 +429,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   auto countTowersLeft = [](StateType s) {
     int towersLeft = 0;
     for (int pos = 0; pos < g_numPos; pos++) {
-      if (stateGet(s, pos) != 0)
+      if (stateGet(s, pos) != 1)
         towersLeft++;
     }
     return towersLeft;
@@ -502,8 +505,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   std::deque<QueueEntry> qForward;
   std::deque<QueueEntry> qReverse;
 
-  parentForward[0] = {0, -1, -1};
-  qForward.push_back({0, 0});
+  parentForward[g_baseState] = {g_baseState, -1, -1};
+  qForward.push_back({g_baseState, 0});
   parentReverse[finalState] = {finalState, -1, -1};
   qReverse.push_back({finalState, countTowersLeft(finalState)});
 
@@ -527,21 +530,21 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     for (; start != end; ++start) {
       StateType cur = start->first;
       int curTowers = start->second;
-      if (cur == 0)
+      if (cur == g_baseState)
         continue;
       for (int pos = 0; pos < g_numPos; pos++) {
         int curType = stateGet(cur, pos);
-        if (curType == 0)
+        if (curType == 1)
           continue;
         uint32_t present = neighborPresent(cur, pos);
         if (!canPlace(present, curType))
           continue;
-        for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
+        for (int prevType = 1; prevType <= g_maxType[pos]; prevType++) {
           if (prevType == curType)
             continue;
           StateType next = canonical(stateSet(cur, pos, prevType));
           int nextTowers =
-              curTowers - (curType != 0 ? 1 : 0) + (prevType != 0 ? 1 : 0);
+              curTowers - (curType != 1 ? 1 : 0) + (prevType != 1 ? 1 : 0);
           out->push_back({next, Transition{cur, (int8_t)pos, (int8_t)curType},
                           nextTowers});
         }
@@ -574,16 +577,16 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
       int minTowersLeft = g_numPos;
       int maxTowersLeft = 0;
-      bool reachedZero = false;
+      bool reachedBase = false;
       for (const auto &entry : layer) {
-        if (entry.first == 0) {
-          reachedZero = true;
+        if (entry.first == g_baseState) {
+          reachedBase = true;
           break;
         }
         minTowersLeft = min(minTowersLeft, entry.second);
         maxTowersLeft = max(maxTowersLeft, entry.second);
       }
-      if (reachedZero) {
+      if (reachedBase) {
         qReverse.clear();
         auto layerEnd = chrono::steady_clock::now();
         double expandMs =
@@ -591,7 +594,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
                 .count();
         lock_guard<mutex> lock(coutMutex);
         cout << "[Reverse] Layer " << depth << " done in " << expandMs
-             << " ms (expand " << expandMs << " ms). Reached state 0." << endl;
+             << " ms (expand " << expandMs << " ms). Reached base state." << endl;
         break;
       }
 
@@ -698,10 +701,10 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
         for (int pos = 0; pos < g_numPos; pos++) {
           int curType = stateGet(cur, pos);
-          if (curType == 4)
+          if (curType == 5)
             continue;
           uint32_t present = neighborPresent(cur, pos);
-          for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+          for (int newType = 1; newType <= g_maxType[pos]; newType++) {
             if (newType == curType)
               continue;
             if (!canPlace(present, newType))
@@ -712,7 +715,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
                              Transition{cur, (int8_t)pos, (int8_t)newType})
                     .second) {
               int nextTowers =
-                  curTowers - (curType != 0 ? 1 : 0) + (newType != 0 ? 1 : 0);
+                  curTowers - (curType != 1 ? 1 : 0) + (newType != 1 ? 1 : 0);
               qForward.push_back({next, nextTowers});
             }
           }
@@ -796,7 +799,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     return d;
   };
 
-  StateType meetState = 0;
+  StateType meetState = g_baseState;
   int bestTotal = INT_MAX;
   size_t interceptCount = 0;
   for (const auto &kv : parentForward) {
@@ -858,7 +861,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     // (pos, type) such that canonical(stateSet(cur, pos, type)) == parent.
     bool foundStep = false;
     for (int p = 0; p < g_numPos && !foundStep; p++) {
-      for (int t = 0; t <= g_maxType[p] && !foundStep; t++) {
+      for (int t = 1; t <= g_maxType[p] && !foundStep; t++) {
         if (t == stateGet(cur, p))
           continue;
         if (canonical(stateSet(cur, p, t)) == parent) {
@@ -997,7 +1000,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
 
       // Try all valid types for this position
       uint32_t present = neighborPresent(cur, pos);
-      for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+      for (int newType = 1; newType <= g_maxType[pos]; newType++) {
         if (newType == curType)
           continue;
         if (!canPlace(present, newType))
@@ -1018,8 +1021,8 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
 }
 
 static SearchResult runSlidingWindow() {
-  SearchResult result{0, 0, 0, 0};
-  result.bestState = 0;
+  SearchResult result{g_baseState, 0, 0, 0};
+  result.bestState = g_baseState;
   result.bestScore = 0;
   result.explored = 0;
 
@@ -1041,7 +1044,7 @@ static SearchResult runSlidingWindow() {
     int scoreAfter;
   };
 
-  StateType currentState = 0;
+  StateType currentState = g_baseState;
   int currentScore = 0;
   int roundNum = 0;
 
@@ -1167,7 +1170,7 @@ static SearchResult runIDDFS() {
   SearchResult result{0, 0, 0, 1};
   robin_hood::unordered_set<StateType> globalSeen;
   globalSeen.reserve(1ull << 24); // ~16M elements
-  globalSeen.insert(0);
+  globalSeen.insert(g_baseState);
 
   for (int depthLimit = 1;; depthLimit++) {
     robin_hood::unordered_set<StateType> seen;
@@ -1180,8 +1183,8 @@ static SearchResult runIDDFS() {
     vector<Entry> stack;
     size_t newStates = 0;
 
-    stack.push_back({0, 0, 0});
-    seen.insert(0);
+    stack.push_back({g_baseState, 0, 0});
+    seen.insert(g_baseState);
 
     while (!stack.empty()) {
       auto cur = stack.back();
@@ -1200,10 +1203,10 @@ static SearchResult runIDDFS() {
 
       for (int pos = 0; pos < g_numPos; pos++) {
         int curType = stateGet(cur.state, pos);
-        if (curType == 4)
-          continue; // Type 4 is never a requirement, no point downgrading
+        if (curType == 5)
+          continue;
         uint32_t present = neighborPresent(cur.state, pos);
-        for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+        for (int newType = 1; newType <= g_maxType[pos]; newType++) {
           if (newType == curType)
             continue;
           if (!canPlace(present, newType))
@@ -1236,8 +1239,8 @@ void runSingleLevel() {
   cout << "Tower Blox Deluxe Solver\n";
   cout << "========================\n";
   cout << "Level: " << getCurrentLevel() << "\n";
-  cout << "Tower types unlocked (0-" << MAX_UNLOCKED_TYPE << "):\n";
-  for (int i = 0; i <= MAX_UNLOCKED_TYPE; i++)
+  cout << "Tower types unlocked (1-" << MAX_UNLOCKED_TYPE << "):\n";
+  for (int i = 1; i <= MAX_UNLOCKED_TYPE; i++)
     cout << "  " << COLORS[i] << BLACK_TEXT << i << RESET << " ("
          << COLOR_NAMES[i] << ")\n";
   if (SEARCH_MODE == 0)
@@ -1271,8 +1274,8 @@ void runSingleLevel() {
     vector<Entry> q;
     size_t head = 0;
 
-    StateType startState = 0;
-    visited[startState] = {0, -1, -1};
+    StateType startState = g_baseState;
+    visited[startState] = {g_baseState, -1, -1};
     q.push_back({startState, 0});
 
     result.bestState = startState;
@@ -1300,10 +1303,10 @@ void runSingleLevel() {
       // Try every possible single-position change
       for (int pos = 0; pos < g_numPos; pos++) {
         int curType = stateGet(cur, pos);
-        if (curType == 4)
-          continue; // Type 4 is never a requirement, no point downgrading
+        if (curType == 5)
+          continue;
         uint32_t present = neighborPresent(cur, pos); // computed once per pos
-        for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+        for (int newType = 1; newType <= g_maxType[pos]; newType++) {
           if (newType == curType)
             continue;
           if (!canPlace(present, newType))
