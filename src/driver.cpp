@@ -27,7 +27,7 @@ int main() {
     for (int unlockedType = UNLOCKED_TYPE_START;
          unlockedType <= UNLOCKED_TYPE_END; unlockedType++) {
       // Generate filename with both level and unlocked type
-      string filename = "../level" + to_string(level) + "_type" +
+      string filename = "level" + to_string(level) + "_type" +
                         to_string(unlockedType) + "_baseline.txt";
       ofstream outFile(filename, std::ios::binary);
       if (!outFile) {
