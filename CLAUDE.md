@@ -80,24 +80,14 @@ The project uses CMake with C++17 standard. Release builds optimized with `/O3 /
 
 ### Search Algorithms
 
-Four search modes available (configure in config.h):
+Two search modes available (configure in config.h):
 
 1. **BFS (0)**: Breadth-first search using queue
    - Guaranteed optimal solutions
    - Memory-intensive (stores all visited states)
-   - Native path reconstruction
+   - Native path reconstruction (no reverse BFS needed)
 
-2. **DFS (1)**: Depth-first search using stack
-   - Lower memory usage
-   - May find suboptimal solutions
-   - Uses post-hoc BFS for path reconstruction
-
-3. **IDDFS (2)**: Iterative deepening DFS
-   - Balances memory and optimality
-   - Explores depth-limited DFS iteratively
-   - Finds optimal solutions with moderate memory
-
-4. **Sliding Window (3)**: Novel optimization for large grids
+2. **Sliding Window (1)**: Novel optimization for large grids
    - Default and most effective for levels 3-5
    - See detailed section below
 

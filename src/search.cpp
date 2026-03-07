@@ -423,9 +423,9 @@ bfsShortestPath(StateType target) {
   return path;
 }
 
-// Reverse BFS from a final state to base (empty or all-blue depending on
-// PATH_FROM_EMPTY). A tower can be removed if its placement requirements are
-// met in the current state.
+// Reverse BFS from a final state back to the path start (empty or all-blue
+// depending on PATH_FROM_EMPTY). Used by mode 1 (Sliding Window) for path
+// reconstruction since the search itself doesn't store transitions.
 static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   const StateType pathStartState =
       PATH_FROM_EMPTY ? StateType(0) : g_baseState;
@@ -1193,73 +1193,6 @@ static SearchResult runSlidingWindow() {
   return result;
 }
 
-static SearchResult runIDDFS() {
-  SearchResult result{0, 0, 0, 1};
-  robin_hood::unordered_set<StateType> globalSeen;
-  globalSeen.reserve(1ull << 24); // ~16M elements
-  globalSeen.insert(g_baseState);
-
-  for (int depthLimit = 1;; depthLimit++) {
-    robin_hood::unordered_set<StateType> seen;
-    seen.reserve(1ull << 20); // ~1M elements per depth
-    struct Entry {
-      StateType state;
-      int score;
-      int depth;
-    };
-    vector<Entry> stack;
-    size_t newStates = 0;
-
-    stack.push_back({g_baseState, 0, 0});
-    seen.insert(g_baseState);
-
-    while (!stack.empty()) {
-      auto cur = stack.back();
-      stack.pop_back();
-      result.explored++;
-
-      if (cur.score > result.bestScore) {
-        result.bestScore = cur.score;
-        result.bestState = cur.state;
-        cout << "New best score: " << result.bestScore << "\n";
-        printGrid(cur.state);
-      }
-
-      if (cur.depth >= depthLimit)
-        continue;
-
-      for (int pos = 0; pos < g_numPos; pos++) {
-        int curType = stateGet(cur.state, pos);
-        if (curType == 5)
-          continue;
-        uint32_t present = neighborPresent(cur.state, pos);
-        for (int newType = 1; newType <= g_maxType[pos]; newType++) {
-          if (newType == curType)
-            continue;
-          if (!canPlace(present, newType))
-            continue;
-
-          StateType next = canonical(stateSet(cur.state, pos, newType));
-          int nextScore = cur.score + (newType - curType);
-          if (seen.insert(next).second) {
-            if (globalSeen.insert(next).second)
-              newStates++;
-            stack.push_back({next, nextScore, cur.depth + 1});
-          }
-        }
-      }
-    }
-
-    result.uniqueStates = globalSeen.size();
-    cout << "Depth " << depthLimit << " complete. New states: " << newStates
-         << "\n";
-    if (newStates == 0)
-      break;
-  }
-
-  return result;
-}
-
 // ── Public entrypoint for a single level/unlocked-type configuration ────────
 
 void runSingleLevel() {
@@ -1272,28 +1205,20 @@ void runSingleLevel() {
          << COLOR_NAMES[i] << ")\n";
   if (SEARCH_MODE == 0)
     cout << "\nRunning BFS over all reachable states...\n\n";
-  else if (SEARCH_MODE == 1)
-    cout << "\nRunning DFS over all reachable states...\n\n";
-  else if (SEARCH_MODE == 2)
-    cout << "\nRunning IDDFS over all reachable states...\n\n";
   else
     cout << "\nRunning sliding window optimization (sequential greedy)...\n\n";
 
   buildLookupTables();
   buildSymmetries();
 
-  SearchResult result{0, 0, 0, 0};
+  SearchResult result{g_baseState, 0, 0, 0};
   robin_hood::unordered_map<StateType, Transition> visited;
   visited.reserve(1ull << 24); // ~16M elements
 
-  if (SEARCH_MODE == 3) {
+  if (SEARCH_MODE == 1) {
     result = runSlidingWindow();
-  } else if (SEARCH_MODE == 2) {
-    result = runIDDFS();
   } else {
-    // BFS/DFS: every state is visited exactly once.
-    // For BFS, the vector is used as a queue with a head index.
-    // For DFS, the vector is used as a stack via push_back/pop_back.
+    // BFS: every state is visited exactly once via a queue with a head index.
     struct Entry {
       StateType state;
       int score;
@@ -1311,15 +1236,8 @@ void runSingleLevel() {
 
     const int typeMin = PATH_FROM_EMPTY ? 0 : 1;
 
-    while ((SEARCH_MODE == 0) ? (head < q.size()) : !q.empty()) {
-      Entry curEntry;
-      if (SEARCH_MODE == 0) {
-        curEntry = q[head++];
-      } else {
-        curEntry = q.back();
-        q.pop_back();
-      }
-      auto [cur, curScore] = curEntry;
+    while (head < q.size()) {
+      auto [cur, curScore] = q[head++];
       result.explored++;
 
       if (curScore > result.bestScore) {
@@ -1329,12 +1247,11 @@ void runSingleLevel() {
         printGrid(cur);
       }
 
-      // Try every possible single-position change
       for (int pos = 0; pos < g_numPos; pos++) {
         int curType = stateGet(cur, pos);
         if (curType == 5)
           continue;
-        uint32_t present = neighborPresent(cur, pos); // computed once per pos
+        uint32_t present = neighborPresent(cur, pos);
         for (int newType = typeMin; newType <= g_maxType[pos]; newType++) {
           if (newType == curType)
             continue;
@@ -1345,9 +1262,8 @@ void runSingleLevel() {
           int nextScore = curScore + (newType - curType);
           auto [it, inserted] = visited.try_emplace(
               next, Transition{cur, (int8_t)pos, (int8_t)newType});
-          if (inserted) {
+          if (inserted)
             q.push_back({next, nextScore});
-          }
         }
       }
 
@@ -1360,38 +1276,25 @@ void runSingleLevel() {
     result.uniqueStates = visited.size();
   }
 
-  if (SEARCH_MODE == 3)
-    cout << "\nSliding window complete.\n";
-  else if (SEARCH_MODE == 2)
-    cout << "\nIDDFS complete.\n";
-  else if (SEARCH_MODE == 1)
-    cout << "\nDFS complete.\n";
-  else
-    cout << "\nBFS complete.\n";
+  cout << (SEARCH_MODE == 1 ? "\nSliding window complete.\n" : "\nBFS complete.\n");
   cout << "States explored : " << result.explored << "\n";
   cout << "Unique states   : " << result.uniqueStates << "\n";
   cout << "Best score      : " << result.bestScore << "\n\n";
   cout << "Optimal layout:\n";
   printGrid(result.bestState);
 
-  // Path reconstruction: BFS already has the path in the visited map; no
-  // reverse BFS. Redirect to baseline file when generating baselines (mode 3
-  // does its own redirect inside buildPathFromReverseBfs).
-  if (g_baselineFile && g_baselineFile->is_open() && SEARCH_MODE != 3) {
-    g_originalCoutBuf = cout.rdbuf();
-    cout.rdbuf(g_baselineFile->rdbuf());
-  }
+  // Path reconstruction. Redirect to baseline file for mode 0 (mode 1 does
+  // its own redirect inside buildPathFromReverseBfs).
   if (SEARCH_MODE == 0) {
+    if (g_baselineFile && g_baselineFile->is_open()) {
+      g_originalCoutBuf = cout.rdbuf();
+      cout.rdbuf(g_baselineFile->rdbuf());
+    }
     printBuildPath(result.bestState, visited);
-  } else if (SEARCH_MODE == 3) {
-    // Path already printed by runSlidingWindow
-  } else {
-    cout << "\nFinding shortest build path via BFS...\n";
-    auto pathMap = bfsShortestPath(result.bestState);
-    printBuildPath(result.bestState, pathMap);
+    if (g_originalCoutBuf) {
+      cout.rdbuf(g_originalCoutBuf);
+      g_originalCoutBuf = nullptr;
+    }
   }
-  if (g_originalCoutBuf) {
-    cout.rdbuf(g_originalCoutBuf);
-    g_originalCoutBuf = nullptr;
-  }
+  // Mode 1: path already printed by runSlidingWindow
 }

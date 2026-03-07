@@ -109,9 +109,8 @@ using StateType128 = uint128_simd;
 // ════════════════════════════════════════════════════════════════════════════
 
 #define LEVEL 2 // Grid level (1-5), must be #define for preprocessor
-// 0 = BFS (queue), 1 = DFS (stack), 2 = IDDFS (iterative deepening DFS), 3 =
-// Sliding Window
-[[maybe_unused]] const int SEARCH_MODE = 0;
+// 0 = BFS, 1 = Sliding Window
+[[maybe_unused]] const int SEARCH_MODE = 1;
 // Maximum tower type unlocked (1=Blue, 2=Red, 3=Green, 4=Yellow, 5=White)
 // Set to 5 for all towers unlocked, 3 for only Blue/Red/Green, etc.
 const int MAX_UNLOCKED_TYPE = 5;
