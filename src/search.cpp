@@ -164,6 +164,17 @@ static const uint32_t g_requiredMask[6] = {0, 0, 2, 6, 14, 30};
 // usesStorage64() forward-declared above; defined here after g_numPos.
 inline bool usesStorage64() { return g_numPos <= 16; }
 
+// Standalone helpers (no lambdas) so profiler shows named functions.
+static int countTowersLeft(StateType s) {
+  int towersLeft = 0;
+  int targetType = PATH_FROM_EMPTY ? 0 : 1;
+  for (int pos = 0; pos < g_numPos; pos++) {
+    if (stateGet(s, pos) != targetType)
+      towersLeft++;
+  }
+  return towersLeft;
+}
+
 // ── Symmetry ────────────────────────────────────────────────────────────────
 // Auto-detects valid symmetries by trying all 8 dihedral transforms against
 // actual grid positions. Keeps only those where every position maps to another
@@ -377,6 +388,24 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
   return out;
 }
 
+static void advanceStateForDisplay(StateType &canonState, StateType &displayState,
+                                   uint64_t &placedMask, int pos, int newType) {
+  int usedSymm = 0;
+  for (int k = 0; k < g_numSymm; k++) {
+    if (applyPerm(displayState, g_symmPerm[k]) == canonState) {
+      usedSymm = k;
+      break;
+    }
+  }
+  int inversePerm[49];
+  for (int i = 0; i < g_numPos; i++)
+    inversePerm[g_symmPerm[usedSymm][i]] = i;
+  int physPos = inversePerm[pos];
+  canonState = canonical(stateSet(canonState, pos, newType));
+  displayState = stateSet(displayState, physPos, newType);
+  placedMask |= (1ull << physPos);
+}
+
 static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
                               StateType startState) {
   const bool fromEmpty = (startState == StateType(0));
@@ -384,28 +413,10 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
   StateType displayState = startState;
   uint64_t placedMask = 0;
 
-  auto advanceState = [&](int pos, int newType) {
-    int usedSymm = 0;
-    for (int k = 0; k < g_numSymm; k++) {
-      if (applyPerm(displayState, g_symmPerm[k]) == canonState) {
-        usedSymm = k;
-        break;
-      }
-    }
-    int inversePerm[49];
-    for (int i = 0; i < g_numPos; i++)
-      inversePerm[g_symmPerm[usedSymm][i]] = i;
-
-    int physPos = inversePerm[pos];
-    canonState = canonical(stateSet(canonState, pos, newType));
-    displayState = stateSet(displayState, physPos, newType);
-    placedMask |= (1ull << physPos);
-  };
-
   // Pre-pass to compute total steps (and trailing implicit blues when from
   // all-1).
   for (auto [pos, newType] : expandedSteps)
-    advanceState(pos, newType);
+    advanceStateForDisplay(canonState, displayState, placedMask, pos, newType);
 
   int totalSteps = (int)expandedSteps.size();
   if (!fromEmpty) {
@@ -456,11 +467,7 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
     else
       invalidSteps++;
 
-    // Update canonical state
-    canonState = canonical(stateSet(canonState, pos, newType));
-    // Update physical display state at the physical position
-    displayState = stateSet(displayState, physPos, newType);
-    placedMask |= (1ull << physPos);
+    advanceStateForDisplay(canonState, displayState, placedMask, pos, newType);
 
     auto [r, c] = GRID.positions[physPos];
     cout << "\nStep " << stepNum << ": pos " << physPos << " (" << r << "," << c
@@ -583,6 +590,386 @@ bfsShortestPath(StateType target) {
   return path;
 }
 
+// Reverse BFS shared types and helpers (named functions for profiling).
+using QueueEntry = std::pair<StateType, int>;
+
+template <typename S>
+struct ReverseExpansion {
+  S next;
+  int nextTowers;
+};
+
+template <typename ParentSet>
+static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
+                          bool keepLowest) {
+  using S = typename ParentSet::value_type;
+  static constexpr size_t kPruneThreshold = 10000;
+  static constexpr int kPruneLowDelta = 3;
+  static constexpr int kPruneHighDelta = 3;
+  if (parentMap.size() <= kPruneThreshold || queue.empty())
+    return;
+
+  int minTowers = g_numPos;
+  int maxTowers = 0;
+  for (const auto &entry : queue) {
+    int tc = entry.second;
+    minTowers = min(minTowers, tc);
+    maxTowers = max(maxTowers, tc);
+  }
+
+  int cutoff = keepLowest ? (minTowers + kPruneLowDelta)
+                          : (maxTowers - kPruneHighDelta);
+  vector<QueueEntry> toProcess;
+  toProcess.reserve(queue.size());
+  for (const auto &entry : queue) {
+    if ((keepLowest && entry.second <= cutoff) ||
+        (!keepLowest && entry.second >= cutoff)) {
+      toProcess.push_back(entry);
+    }
+  }
+
+  if (toProcess.empty()) {
+    if (keepLowest)
+      toProcess.push_back(
+          *min_element(queue.begin(), queue.end(),
+                       [](const QueueEntry &a, const QueueEntry &b) {
+                         return a.second < b.second;
+                       }));
+    else
+      toProcess.push_back(
+          *max_element(queue.begin(), queue.end(),
+                       [](const QueueEntry &a, const QueueEntry &b) {
+                         return a.second > b.second;
+                       }));
+  }
+
+  ParentSet pruned;
+  pruned.reserve(toProcess.size() * 4);
+  for (const auto &entry : toProcess)
+    pruned.emplace(*parentMap.find(toStorageKey<S>(entry.first)));
+
+  std::deque<QueueEntry> worklist(toProcess.begin(), toProcess.end());
+  while (!worklist.empty()) {
+    StateType cur = worklist.front().first;
+    worklist.pop_front();
+    auto it = parentMap.find(toStorageKey<S>(cur));
+    if (it == parentMap.end())
+      continue;
+    auto tr = storageTrans<S>(*it);
+    if (tr.getPos() == -1)
+      continue;
+    StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
+    if (parentMap.count(toStorageKey<S>(parent)) &&
+        pruned.find(toStorageKey<S>(parent)) == pruned.end()) {
+      pruned.emplace(*parentMap.find(toStorageKey<S>(parent)));
+      worklist.push_back({parent, countTowersLeft(parent)});
+    }
+  }
+
+  parentMap.swap(pruned);
+  queue.assign(toProcess.begin(), toProcess.end());
+}
+
+template <typename S>
+static void reverseExpandChunkImpl(
+    const QueueEntry *start, const QueueEntry *end,
+    vector<ReverseExpansion<S>> *out, StateType pathStartState,
+    int reverseBaseType) {
+  const auto &backTable =
+      PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
+  for (; start != end; ++start) {
+    StateType cur = start->first;
+    int curTowers = start->second;
+    if (cur == pathStartState)
+      continue;
+    for (int pos = 0; pos < g_numPos; pos++) {
+      int curType = stateGet(cur, pos);
+      uint32_t present = neighborPresent(cur, pos);
+      if (!canPlace(present, curType))
+        continue;
+      for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
+        if (!backTable[curType][prevType])
+          continue;
+        auto [next, childPos] =
+            canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
+        int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
+                         (prevType != reverseBaseType ? 1 : 0);
+        out->push_back(
+            {encodeForStorage<S>(next,
+                                 Transition{(int8_t)childPos, (int8_t)curType}),
+             nextTowers});
+      }
+    }
+  }
+}
+
+template <typename S>
+struct ReverseTaskContext {
+  std::deque<QueueEntry> *qReverse;
+  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> *parentReverse;
+  StateType pathStartState;
+  std::mutex *coutMutex;
+  std::atomic<bool> *reverseFinished;
+  size_t *totalReverseVisited;
+  int reverseBaseType;
+};
+
+template <typename S>
+static void runReverseTask(ReverseTaskContext<S> *ctx) {
+  std::deque<QueueEntry> &qReverse = *ctx->qReverse;
+  auto &parentReverse = *ctx->parentReverse;
+  StateType pathStartState = ctx->pathStartState;
+  std::mutex &coutMutex = *ctx->coutMutex;
+  std::atomic<bool> &reverseFinished = *ctx->reverseFinished;
+  size_t &totalReverseVisited = *ctx->totalReverseVisited;
+  int reverseBaseType = ctx->reverseBaseType;
+
+  size_t depth = 0;
+  while (!qReverse.empty()) {
+    size_t layerCount = qReverse.size();
+    {
+      lock_guard<mutex> lock(coutMutex);
+      cout << "[Reverse] Layer " << depth << ": expanding " << layerCount
+           << " states ("
+           << max(1, min(REVERSE_BFS_NUM_THREADS, (int)layerCount))
+           << " threads)..." << endl;
+    }
+    auto layerStart = chrono::steady_clock::now();
+
+    vector<QueueEntry> layer;
+    layer.reserve(layerCount);
+    for (size_t i = 0; i < layerCount; i++) {
+      layer.push_back(qReverse.front());
+      qReverse.pop_front();
+    }
+
+    int minTowersLeft = g_numPos;
+    int maxTowersLeft = 0;
+    bool reachedBase = false;
+    for (const auto &entry : layer) {
+      if (entry.first == pathStartState) {
+        reachedBase = true;
+        break;
+      }
+      minTowersLeft = min(minTowersLeft, entry.second);
+      maxTowersLeft = max(maxTowersLeft, entry.second);
+    }
+    if (reachedBase) {
+      qReverse.clear();
+      auto layerEnd = chrono::steady_clock::now();
+      double expandMs =
+          chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
+              .count();
+      lock_guard<mutex> lock(coutMutex);
+      cout << "[Reverse] Layer " << depth << " done in " << expandMs
+           << " ms (expand " << expandMs << " ms). Reached base state."
+           << endl;
+      break;
+    }
+
+    const int numThreads =
+        max(1, min(REVERSE_BFS_NUM_THREADS, (int)layer.size()));
+    const size_t chunkSize =
+        (layer.size() + (size_t)numThreads - 1) / (size_t)numThreads;
+    vector<vector<ReverseExpansion<S>>> results((size_t)numThreads);
+    for (int c = 0; c < numThreads; c++)
+      results[c].reserve(layer.size() * 2);
+
+    vector<thread> revThreads;
+    for (int c = 0; c < numThreads; c++) {
+      const QueueEntry *chunkStart = layer.data() + (size_t)c * chunkSize;
+      const QueueEntry *chunkEnd =
+          layer.data() + min((size_t)(c + 1) * chunkSize, layer.size());
+      if (chunkStart < chunkEnd)
+        revThreads.emplace_back(reverseExpandChunkImpl<S>, chunkStart, chunkEnd,
+                               &results[c], pathStartState, reverseBaseType);
+    }
+    for (auto &t : revThreads)
+      t.join();
+
+    for (int c = 0; c < numThreads; c++) {
+      for (const auto &r : results[c]) {
+        if (parentReverse.emplace(r.next).second) {
+          totalReverseVisited++;
+          qReverse.push_back({storageToState<S>(r.next), r.nextTowers});
+        }
+      }
+    }
+
+    auto layerEnd = chrono::steady_clock::now();
+    double expandMs =
+        chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
+            .count();
+    double pruneMs = 0.0;
+    if (!qReverse.empty()) {
+      auto pruneStart = chrono::steady_clock::now();
+      pruneSideImpl(parentReverse, qReverse, true);
+      pruneMs = chrono::duration_cast<chrono::milliseconds>(
+                    chrono::steady_clock::now() - pruneStart)
+                    .count();
+    }
+    double totalMs = expandMs + pruneMs;
+    {
+      lock_guard<mutex> lock(coutMutex);
+      cout << "[Reverse] Layer " << depth << " done in " << totalMs
+           << " ms (expand " << expandMs << " ms, prune " << pruneMs
+           << " ms). Queue size now " << qReverse.size() << ", map size "
+           << parentReverse.size() << "." << endl;
+    }
+    depth++;
+  }
+  {
+    lock_guard<mutex> lock(coutMutex);
+    cout << "[Reverse] Queue empty. Reverse BFS finished." << endl;
+  }
+  reverseFinished = true;
+}
+
+template <typename S>
+struct ForwardTaskContext {
+  std::deque<QueueEntry> *qForward;
+  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> *parentForward;
+  StateType pathStartState;
+  int reverseBaseType;
+  std::atomic<bool> *reverseFinished;
+  std::mutex *coutMutex;
+};
+
+template <typename S>
+static void runForwardTask(ForwardTaskContext<S> *ctx) {
+  std::deque<QueueEntry> &qForward = *ctx->qForward;
+  auto &parentForward = *ctx->parentForward;
+  int reverseBaseType = ctx->reverseBaseType;
+  std::atomic<bool> &reverseFinished = *ctx->reverseFinished;
+  std::mutex &coutMutex = *ctx->coutMutex;
+
+  size_t forwardDepth = 0;
+  while (!qForward.empty()) {
+    if (reverseFinished) {
+      lock_guard<mutex> lock(coutMutex);
+      cout << "[Forward] Reverse finished; stopping immediately." << endl;
+      break;
+    }
+    size_t forwardLayerCount = qForward.size();
+    {
+      lock_guard<mutex> lock(coutMutex);
+      cout << "[Forward] Layer " << forwardDepth << ": expanding "
+           << forwardLayerCount << " states..." << endl;
+    }
+    auto forwardLayerStart = chrono::steady_clock::now();
+    int minForwardTowersLeft = g_numPos;
+    int maxForwardTowersLeft = 0;
+    bool anyForwardProcessed = false;
+    bool stoppedByReverse = false;
+
+    for (size_t i = 0; i < forwardLayerCount; i++) {
+      if (reverseFinished) {
+        stoppedByReverse = true;
+        break;
+      }
+      StateType cur = qForward.front().first;
+      int curTowers = qForward.front().second;
+      qForward.pop_front();
+      if (!anyForwardProcessed) {
+        minForwardTowersLeft = curTowers;
+        maxForwardTowersLeft = curTowers;
+        anyForwardProcessed = true;
+      } else {
+        minForwardTowersLeft = min(minForwardTowersLeft, curTowers);
+        maxForwardTowersLeft = max(maxForwardTowersLeft, curTowers);
+      }
+
+      for (int pos = 0; pos < g_numPos; pos++) {
+        int curType = stateGet(cur, pos);
+        uint32_t present = neighborPresent(cur, pos);
+        for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+          if (!FORWARD_TRANSITIONS[curType][newType])
+            continue;
+          if (!canPlace(present, newType))
+            continue;
+          auto [next, childPos] =
+              canonicalAndChildPos(stateSet(cur, pos, newType), pos);
+          if (parentForward
+                  .emplace(encodeForStorage<S>(
+                      next, Transition{(int8_t)childPos, (int8_t)curType}))
+                  .second) {
+            int nextTowers = curTowers -
+                             (curType != reverseBaseType ? 1 : 0) +
+                             (newType != reverseBaseType ? 1 : 0);
+            qForward.push_back({storageToState<S>(next), nextTowers});
+          }
+        }
+      }
+    }
+
+    auto forwardLayerEnd = chrono::steady_clock::now();
+    double expandMs = chrono::duration_cast<chrono::milliseconds>(
+                          forwardLayerEnd - forwardLayerStart)
+                          .count();
+    double pruneMs = 0.0;
+    if (!stoppedByReverse && !qForward.empty()) {
+      auto pruneStart = chrono::steady_clock::now();
+      pruneSideImpl(parentForward, qForward, false);
+      pruneMs = chrono::duration_cast<chrono::milliseconds>(
+                    chrono::steady_clock::now() - pruneStart)
+                    .count();
+    }
+    double totalMs = expandMs + pruneMs;
+    {
+      lock_guard<mutex> lock(coutMutex);
+      cout << "[Forward] Layer " << forwardDepth << " done in " << totalMs
+           << " ms (expand " << expandMs << " ms, prune " << pruneMs
+           << " ms). Queue size now " << qForward.size() << ", map size "
+           << parentForward.size();
+      if (stoppedByReverse)
+        cout << " (stopped mid-layer: reverse finished)";
+      cout << "." << endl;
+    }
+    if (stoppedByReverse)
+      break;
+    forwardDepth++;
+  }
+  {
+    lock_guard<mutex> lock(coutMutex);
+    cout << "[Forward] Forward BFS finished (queue empty or reverse finished)."
+         << endl;
+  }
+}
+
+template <typename S>
+static int forwardDepthOfImpl(
+    const ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+        &parentForward,
+    StateType s) {
+  int d = 0;
+  StateType cur = s;
+  while (parentForward.count(toStorageKey<S>(cur))) {
+    auto tr = storageTrans<S>(*parentForward.find(toStorageKey<S>(cur)));
+    if (tr.getPos() == -1)
+      break;
+    cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
+    d++;
+  }
+  return d;
+}
+
+template <typename S>
+static int reverseDepthOfImpl(
+    const ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+        &parentReverse,
+    StateType s) {
+  int d = 0;
+  StateType cur = s;
+  while (parentReverse.count(toStorageKey<S>(cur))) {
+    auto tr = storageTrans<S>(*parentReverse.find(toStorageKey<S>(cur)));
+    if (tr.getPos() == -1)
+      break;
+    cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
+    d++;
+  }
+  return d;
+}
+
 // Reverse BFS from a final state back to the path start (empty or all-blue
 // depending on PATH_FROM_EMPTY). Used by mode 1 (Sliding Window) for path
 // reconstruction since the search itself doesn't store transitions.
@@ -590,98 +977,13 @@ bfsShortestPath(StateType target) {
 template <typename S>
 static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) {
   const StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+  const int reverseBaseType = PATH_FROM_EMPTY ? 0 : 1;
 
   ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> parentReverse;
   parentReverse.reserve(1ull << 26); // ~64M elements
   ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> parentForward;
   if (RUN_PARALLEL_FORWARD_BFS)
     parentForward.reserve(1ull << 26); // ~64M elements
-
-  const size_t kPruneThreshold = 10000;
-  const int kPruneLowDelta = 3;
-  const int kPruneHighDelta = 3;
-
-  // Tower count for pruning: non-empty when PATH_FROM_EMPTY, non-blue otherwise
-  auto countTowersLeft = [pathStartState](StateType s) {
-    int towersLeft = 0;
-    int targetType = PATH_FROM_EMPTY ? 0 : 1;
-    for (int pos = 0; pos < g_numPos; pos++) {
-      if (stateGet(s, pos) != targetType)
-        towersLeft++;
-    }
-    return towersLeft;
-  };
-
-  // Queue entries: (state, tower count) so pruning never calls countTowersLeft
-  // over the full queue.
-  using QueueEntry = std::pair<StateType, int>;
-
-  // Prune: keep only frontier states that pass cutoff + their ancestors.
-  // Build pruned map by walking backwards from kept frontier (no full parentMap
-  // scan, no separate keepStates set).
-  auto pruneSide = [&](auto &parentMap, std::deque<QueueEntry> &queue,
-                       bool keepLowest) {
-    if (parentMap.size() <= kPruneThreshold || queue.empty())
-      return;
-
-    int minTowers = g_numPos;
-    int maxTowers = 0;
-    for (const auto &entry : queue) {
-      int tc = entry.second;
-      minTowers = min(minTowers, tc);
-      maxTowers = max(maxTowers, tc);
-    }
-
-    int cutoff = keepLowest ? (minTowers + kPruneLowDelta)
-                            : (maxTowers - kPruneHighDelta);
-    vector<QueueEntry> toProcess;
-    toProcess.reserve(queue.size());
-    for (const auto &entry : queue) {
-      if ((keepLowest && entry.second <= cutoff) ||
-          (!keepLowest && entry.second >= cutoff)) {
-        toProcess.push_back(entry);
-      }
-    }
-
-    if (toProcess.empty()) {
-      auto bestIt = keepLowest ? min_element(queue.begin(), queue.end(),
-                                             [](const auto &a, const auto &b) {
-                                               return a.second < b.second;
-                                             })
-                               : max_element(queue.begin(), queue.end(),
-                                             [](const auto &a, const auto &b) {
-                                               return a.second > b.second;
-                                             });
-      toProcess.push_back(*bestIt);
-    }
-
-    using SetType = std::decay_t<decltype(parentMap)>;
-    SetType pruned;
-    pruned.reserve(toProcess.size() * 4);
-    for (const auto &entry : toProcess)
-      pruned.emplace(*parentMap.find(toStorageKey<S>(entry.first)));
-
-    std::deque<QueueEntry> worklist(toProcess.begin(), toProcess.end());
-    while (!worklist.empty()) {
-      StateType cur = worklist.front().first;
-      worklist.pop_front();
-      auto it = parentMap.find(toStorageKey<S>(cur));
-      if (it == parentMap.end())
-        continue;
-      auto tr = storageTrans<S>(*it);
-      if (tr.getPos() == -1)
-        continue;
-      StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
-      if (parentMap.count(toStorageKey<S>(parent)) &&
-          pruned.find(toStorageKey<S>(parent)) == pruned.end()) {
-        pruned.emplace(*parentMap.find(toStorageKey<S>(parent)));
-        worklist.push_back({parent, countTowersLeft(parent)});
-      }
-    }
-
-    parentMap.swap(pruned);
-    queue.assign(toProcess.begin(), toProcess.end());
-  };
 
   std::deque<QueueEntry> qReverse;
   std::deque<QueueEntry> qForward;
@@ -697,259 +999,6 @@ static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) 
   size_t totalReverseVisited =
       0; // total states ever discovered by reverse (before pruning)
 
-  // Legal transitions: FORWARD_TRANSITIONS (normal BFS); BACKWARD_TRANSITIONS*
-  // tables in config.h (plus runtime canPlace() neighbor check).
-  // Forward stores Transition(parent, pos, newType); reverse stores (cur, pos,
-  // curType). Reverse path reconstruction searches for (p,t) with
-  // canonical(stateSet(cur, p, t)) == parent because canonical frames may
-  // differ.
-
-  // Result of expanding one state in reverse: (encoded storage element, towers).
-  struct ReverseExpansion {
-    S next; // encodeForStorage<S>(canonical pure state, transition)
-    int nextTowers;
-  };
-
-  // Expand a range of (cur, curTowers) into a list of new states (no shared map
-  // writes).
-  const auto &backTable =
-      PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
-  const int reverseBaseType = PATH_FROM_EMPTY ? 0 : 1;
-
-  auto reverseExpandChunk = [&](const QueueEntry *start, const QueueEntry *end,
-                                vector<ReverseExpansion> *out) {
-    for (; start != end; ++start) {
-      StateType cur = start->first;
-      int curTowers = start->second;
-      if (cur == pathStartState)
-        continue;
-      for (int pos = 0; pos < g_numPos; pos++) {
-        int curType = stateGet(cur, pos);
-        uint32_t present = neighborPresent(cur, pos);
-        if (!canPlace(present, curType))
-          continue;
-        for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
-          if (!backTable[curType][prevType])
-            continue;
-          auto [next, childPos] =
-              canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
-          int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
-                           (prevType != reverseBaseType ? 1 : 0);
-          out->push_back(
-              {encodeForStorage<S>(next,
-                                   Transition{(int8_t)childPos, (int8_t)curType}),
-               nextTowers});
-        }
-      }
-    }
-  };
-
-  // Reverse BFS: run to completion; each layer split between 2 threads.
-  auto reverseTask = [&]() {
-    size_t depth = 0;
-    double lastReverseLayerMs = 0.0;
-    while (!qReverse.empty()) {
-      size_t layerCount = qReverse.size();
-      {
-        lock_guard<mutex> lock(coutMutex);
-        cout << "[Reverse] Layer " << depth << ": expanding " << layerCount
-             << " states ("
-             << max(1, min(REVERSE_BFS_NUM_THREADS, (int)layerCount))
-             << " threads)..." << endl;
-      }
-      auto layerStart = chrono::steady_clock::now();
-
-      // Pop entire layer into a vector.
-      vector<QueueEntry> layer;
-      layer.reserve(layerCount);
-      for (size_t i = 0; i < layerCount; i++) {
-        layer.push_back(qReverse.front());
-        qReverse.pop_front();
-      }
-
-      int minTowersLeft = g_numPos;
-      int maxTowersLeft = 0;
-      bool reachedBase = false;
-      for (const auto &entry : layer) {
-        if (entry.first == pathStartState) {
-          reachedBase = true;
-          break;
-        }
-        minTowersLeft = min(minTowersLeft, entry.second);
-        maxTowersLeft = max(maxTowersLeft, entry.second);
-      }
-      if (reachedBase) {
-        qReverse.clear();
-        auto layerEnd = chrono::steady_clock::now();
-        double expandMs =
-            chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
-                .count();
-        lock_guard<mutex> lock(coutMutex);
-        cout << "[Reverse] Layer " << depth << " done in " << expandMs
-             << " ms (expand " << expandMs << " ms). Reached base state."
-             << endl;
-        break;
-      }
-
-      // Split layer across N threads; each expands its chunk into a local
-      // vector.
-      const int numThreads =
-          max(1, min(REVERSE_BFS_NUM_THREADS, (int)layer.size()));
-      const size_t chunkSize =
-          (layer.size() + (size_t)numThreads - 1) / (size_t)numThreads;
-      vector<vector<ReverseExpansion>> results((size_t)numThreads);
-      for (int c = 0; c < numThreads; c++)
-        results[c].reserve(layer.size() * 2);
-
-      vector<thread> revThreads;
-      for (int c = 0; c < numThreads; c++) {
-        const QueueEntry *chunkStart = layer.data() + (size_t)c * chunkSize;
-        const QueueEntry *chunkEnd =
-            layer.data() + min((size_t)(c + 1) * chunkSize, layer.size());
-        if (chunkStart < chunkEnd)
-          revThreads.emplace_back(reverseExpandChunk, chunkStart, chunkEnd,
-                                  &results[c]);
-      }
-      for (auto &t : revThreads)
-        t.join();
-
-      // Merge into shared set and queue (single-threaded, dedup via emplace).
-      for (int c = 0; c < numThreads; c++) {
-        for (const auto &r : results[c]) {
-          if (parentReverse.emplace(r.next).second) {
-            totalReverseVisited++;
-            qReverse.push_back({storageToState<S>(r.next), r.nextTowers});
-          }
-        }
-      }
-
-      auto layerEnd = chrono::steady_clock::now();
-      double expandMs =
-          chrono::duration_cast<chrono::milliseconds>(layerEnd - layerStart)
-              .count();
-      double pruneMs = 0.0;
-      if (!qReverse.empty()) {
-        auto pruneStart = chrono::steady_clock::now();
-        pruneSide(parentReverse, qReverse, true);
-        pruneMs = chrono::duration_cast<chrono::milliseconds>(
-                      chrono::steady_clock::now() - pruneStart)
-                      .count();
-      }
-      double totalMs = expandMs + pruneMs;
-      lastReverseLayerMs = totalMs;
-      {
-        lock_guard<mutex> lock(coutMutex);
-        cout << "[Reverse] Layer " << depth << " done in " << totalMs
-             << " ms (expand " << expandMs << " ms, prune " << pruneMs
-             << " ms). Queue size now " << qReverse.size() << ", map size "
-             << parentReverse.size() << "." << endl;
-      }
-      depth++;
-    }
-    {
-      lock_guard<mutex> lock(coutMutex);
-      cout << "[Reverse] Queue empty. Reverse BFS finished." << endl;
-    }
-    reverseFinished = true;
-  };
-
-  // Forward BFS: stops as soon as reverse finishes (check inside layer so we
-  // don't wait).
-  auto forwardTask = [&]() {
-    size_t forwardDepth = 0;
-    while (!qForward.empty()) {
-      if (reverseFinished) {
-        lock_guard<mutex> lock(coutMutex);
-        cout << "[Forward] Reverse finished; stopping immediately." << endl;
-        break;
-      }
-      size_t forwardLayerCount = qForward.size();
-      {
-        lock_guard<mutex> lock(coutMutex);
-        cout << "[Forward] Layer " << forwardDepth << ": expanding "
-             << forwardLayerCount << " states..." << endl;
-      }
-      auto forwardLayerStart = chrono::steady_clock::now();
-      int minForwardTowersLeft = g_numPos;
-      int maxForwardTowersLeft = 0;
-      bool anyForwardProcessed = false;
-      bool stoppedByReverse = false;
-
-      for (size_t i = 0; i < forwardLayerCount; i++) {
-        if (reverseFinished) {
-          stoppedByReverse = true;
-          break;
-        }
-        StateType cur = qForward.front().first;
-        int curTowers = qForward.front().second;
-        qForward.pop_front();
-        if (!anyForwardProcessed) {
-          minForwardTowersLeft = curTowers;
-          maxForwardTowersLeft = curTowers;
-          anyForwardProcessed = true;
-        } else {
-          minForwardTowersLeft = min(minForwardTowersLeft, curTowers);
-          maxForwardTowersLeft = max(maxForwardTowersLeft, curTowers);
-        }
-
-        for (int pos = 0; pos < g_numPos; pos++) {
-          int curType = stateGet(cur, pos);
-          uint32_t present = neighborPresent(cur, pos);
-          for (int newType = 0; newType <= g_maxType[pos]; newType++) {
-            if (!FORWARD_TRANSITIONS[curType][newType])
-              continue;
-            if (!canPlace(present, newType))
-              continue;
-            auto [next, childPos] =
-                canonicalAndChildPos(stateSet(cur, pos, newType), pos);
-            if (parentForward
-                    .emplace(encodeForStorage<S>(
-                        next, Transition{(int8_t)childPos, (int8_t)curType}))
-                    .second) {
-              int nextTowers = curTowers -
-                               (curType != reverseBaseType ? 1 : 0) +
-                               (newType != reverseBaseType ? 1 : 0);
-              qForward.push_back({storageToState<S>(next), nextTowers});
-            }
-          }
-        }
-      }
-
-      auto forwardLayerEnd = chrono::steady_clock::now();
-      double expandMs = chrono::duration_cast<chrono::milliseconds>(
-                            forwardLayerEnd - forwardLayerStart)
-                            .count();
-      double pruneMs = 0.0;
-      if (!stoppedByReverse && !qForward.empty()) {
-        auto pruneStart = chrono::steady_clock::now();
-        pruneSide(parentForward, qForward, false);
-        pruneMs = chrono::duration_cast<chrono::milliseconds>(
-                      chrono::steady_clock::now() - pruneStart)
-                      .count();
-      }
-      double totalMs = expandMs + pruneMs;
-      {
-        lock_guard<mutex> lock(coutMutex);
-        cout << "[Forward] Layer " << forwardDepth << " done in " << totalMs
-             << " ms (expand " << expandMs << " ms, prune " << pruneMs
-             << " ms). Queue size now " << qForward.size() << ", map size "
-             << parentForward.size();
-        if (stoppedByReverse)
-          cout << " (stopped mid-layer: reverse finished)";
-        cout << "." << endl;
-      }
-      if (stoppedByReverse)
-        break;
-      forwardDepth++;
-    }
-    {
-      lock_guard<mutex> lock(coutMutex);
-      cout
-          << "[Forward] Forward BFS finished (queue empty or reverse finished)."
-          << endl;
-    }
-  };
-
   {
     lock_guard<mutex> lock(coutMutex);
     if (RUN_PARALLEL_FORWARD_BFS)
@@ -959,10 +1008,18 @@ static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) 
     else
       cout << "[Main] Reverse BFS only (parallel forward disabled)." << endl;
   }
-  thread tReverse(reverseTask);
+
+  ReverseTaskContext<S> revCtx{&qReverse,     &parentReverse,
+                              pathStartState, &coutMutex,
+                              &reverseFinished, &totalReverseVisited,
+                              reverseBaseType};
+  thread tReverse(runReverseTask<S>, &revCtx);
   thread tForward;
-  if (RUN_PARALLEL_FORWARD_BFS)
-    tForward = thread(forwardTask);
+  if (RUN_PARALLEL_FORWARD_BFS) {
+    ForwardTaskContext<S> fwdCtx{&qForward, &parentForward, pathStartState,
+                                 reverseBaseType, &reverseFinished, &coutMutex};
+    tForward = thread(runForwardTask<S>, &fwdCtx);
+  }
   tReverse.join();
   if (RUN_PARALLEL_FORWARD_BFS) {
     {
@@ -1016,31 +1073,6 @@ static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) 
   }
 
   // Meet-in-the-middle: find best intercept and build path from both sets.
-  auto forwardDepthOf = [&parentForward](StateType s) {
-    int d = 0;
-    StateType cur = s;
-    while (parentForward.count(toStorageKey<S>(cur))) {
-      auto tr = storageTrans<S>(*parentForward.find(toStorageKey<S>(cur)));
-      if (tr.getPos() == -1)
-        break;
-      cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
-      d++;
-    }
-    return d;
-  };
-  auto reverseDepthOf = [&parentReverse](StateType s) {
-    int d = 0;
-    StateType cur = s;
-    while (parentReverse.count(toStorageKey<S>(cur))) {
-      auto tr = storageTrans<S>(*parentReverse.find(toStorageKey<S>(cur)));
-      if (tr.getPos() == -1)
-        break;
-      cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
-      d++;
-    }
-    return d;
-  };
-
   StateType meetState = pathStartState;
   int bestTotal = INT_MAX;
   size_t interceptCount = 0;
@@ -1049,8 +1081,8 @@ static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) 
     if (parentReverse.count(toStorageKey<S>(s)) == 0)
       continue;
     interceptCount++;
-    int fd = forwardDepthOf(s);
-    int rd = reverseDepthOf(s);
+    int fd = forwardDepthOfImpl<S>(parentForward, s);
+    int rd = reverseDepthOfImpl<S>(parentReverse, s);
     int total = fd + rd;
     if (total < bestTotal) {
       bestTotal = total;
@@ -1062,8 +1094,10 @@ static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) 
     lock_guard<mutex> lock(coutMutex);
     cout << "[Main] Found " << interceptCount
          << " states in both maps. Best intercept has forward depth "
-         << forwardDepthOf(meetState) << ", reverse depth "
-         << reverseDepthOf(meetState) << ", total " << bestTotal << " steps."
+         << forwardDepthOfImpl<S>(parentForward, meetState)
+         << ", reverse depth "
+         << reverseDepthOfImpl<S>(parentReverse, meetState) << ", total "
+         << bestTotal << " steps."
          << endl;
   }
 
