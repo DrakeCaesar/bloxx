@@ -416,7 +416,6 @@ bfsShortestPath(StateType target) {
   StateType bfsStart = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
   path[bfsStart] = {bfsStart, -1, -1};
   q.push_back({bfsStart, 0});
-  const int bfsTypeMin = PATH_FROM_EMPTY ? 0 : 1;
 
   while (head < q.size()) {
     auto [cur, curScore] = q[head++];
@@ -424,11 +423,9 @@ bfsShortestPath(StateType target) {
       break;
     for (int pos = 0; pos < g_numPos; pos++) {
       int curType = stateGet(cur, pos);
-      if (curType == 5)
-        continue;
       uint32_t present = neighborPresent(cur, pos);
-      for (int newType = bfsTypeMin; newType <= g_maxType[pos]; newType++) {
-        if (newType == curType)
+      for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+        if (!FORWARD_TRANSITIONS[curType][newType])
           continue;
         if (!canPlace(present, newType))
           continue;
@@ -458,11 +455,12 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   const int kPruneLowDelta = 3;
   const int kPruneHighDelta = 3;
 
-  auto countTowersLeft = [](StateType s) {
+  // Tower count for pruning: non-empty when PATH_FROM_EMPTY, non-blue otherwise
+  auto countTowersLeft = [pathStartState](StateType s) {
     int towersLeft = 0;
-    const int bt = PATH_FROM_EMPTY ? 0 : 1;
+    int targetType = PATH_FROM_EMPTY ? 0 : 1;
     for (int pos = 0; pos < g_numPos; pos++) {
-      if (stateGet(s, pos) != bt)
+      if (stateGet(s, pos) != targetType)
         towersLeft++;
     }
     return towersLeft;
@@ -548,6 +546,13 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   size_t totalReverseVisited =
       0; // total states ever discovered by reverse (before pruning)
 
+  // Legal transitions governed by FORWARD_TRANSITIONS / BACKWARD_TRANSITIONS*
+  // tables in config.h (plus runtime canPlace() neighbor check).
+  // Forward stores Transition(parent, pos, newType); reverse stores (cur, pos,
+  // curType). Reverse path reconstruction searches for (p,t) with
+  // canonical(stateSet(cur, p, t)) == parent because canonical frames may
+  // differ.
+
   // Result of expanding one state in reverse: (next state, transition, next
   // tower count).
   struct ReverseExpansion {
@@ -558,8 +563,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   // Expand a range of (cur, curTowers) into a list of new states (no shared map
   // writes).
-  const int reversePrevMin = PATH_FROM_EMPTY ? 0 : 1;
-  const int baseType = PATH_FROM_EMPTY ? 0 : 1;
+  const auto &backTable =
+      PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
+  const int reverseBaseType = PATH_FROM_EMPTY ? 0 : 1;
 
   auto reverseExpandChunk = [&](const QueueEntry *start, const QueueEntry *end,
                                 vector<ReverseExpansion> *out) {
@@ -573,13 +579,12 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         uint32_t present = neighborPresent(cur, pos);
         if (!canPlace(present, curType))
           continue;
-        for (int prevType = reversePrevMin; prevType <= min(g_maxType[pos], 4);
-             prevType++) {
-          if (prevType == curType)
+        for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
+          if (!backTable[curType][prevType])
             continue;
           StateType next = canonical(stateSet(cur, pos, prevType));
-          int nextTowers = curTowers - (curType != baseType ? 1 : 0) +
-                           (prevType != baseType ? 1 : 0);
+          int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
+                           (prevType != reverseBaseType ? 1 : 0);
           out->push_back({next, Transition{cur, (int8_t)pos, (int8_t)curType},
                           nextTowers});
         }
@@ -737,11 +742,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
         for (int pos = 0; pos < g_numPos; pos++) {
           int curType = stateGet(cur, pos);
-          if (curType == 5)
-            continue;
           uint32_t present = neighborPresent(cur, pos);
-          for (int newType = 1; newType <= g_maxType[pos]; newType++) {
-            if (newType == curType)
+          for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+            if (!FORWARD_TRANSITIONS[curType][newType])
               continue;
             if (!canPlace(present, newType))
               continue;
@@ -750,11 +753,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
                     .emplace(next,
                              Transition{cur, (int8_t)pos, (int8_t)newType})
                     .second) {
-              int nextTowers = PATH_FROM_EMPTY
-                                   ? (curTowers + (newType != 0 ? 1 : 0) -
-                                      (curType != 0 ? 1 : 0))
-                                   : (curTowers - (curType != 1 ? 1 : 0) +
-                                      (newType != 1 ? 1 : 0));
+              int nextTowers = curTowers -
+                               (curType != reverseBaseType ? 1 : 0) +
+                               (newType != reverseBaseType ? 1 : 0);
               qForward.push_back({next, nextTowers});
             }
           }
@@ -895,9 +896,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   cur = meetState;
   while (parentReverse.at(cur).getPos() != -1) {
     StateType parent = parentReverse.at(cur).parent;
-    // canonical() may apply different symmetry transforms to cur and parent,
-    // so their indices can differ at multiple positions. Search for the step
-    // (pos, type) such that canonical(stateSet(cur, pos, type)) == parent.
+    // Stored transition (pos, curType) is in parent's canonical frame; cur may
+    // be in a different one, so we search for (p,t) with
+    // canonical(stateSet(cur,p,t))==parent.
     bool foundStep = false;
     int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
     for (int p = 0; p < g_numPos && !foundStep; p++) {
@@ -1038,10 +1039,9 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
         continue;
       int curType = stateGet(cur, pos);
 
-      // Try all valid types for this position
       uint32_t present = neighborPresent(cur, pos);
-      for (int newType = 1; newType <= g_maxType[pos]; newType++) {
-        if (newType == curType)
+      for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+        if (!FORWARD_TRANSITIONS[curType][newType])
           continue;
         if (!canPlace(present, newType))
           continue;
@@ -1250,8 +1250,6 @@ void runSingleLevel() {
     result.bestScore = 0;
     result.explored = 0;
 
-    const int typeMin = PATH_FROM_EMPTY ? 0 : 1;
-
     while (head < q.size()) {
       auto [cur, curScore] = q[head++];
       result.explored++;
@@ -1265,11 +1263,9 @@ void runSingleLevel() {
 
       for (int pos = 0; pos < g_numPos; pos++) {
         int curType = stateGet(cur, pos);
-        if (curType == 5)
-          continue;
         uint32_t present = neighborPresent(cur, pos);
-        for (int newType = typeMin; newType <= g_maxType[pos]; newType++) {
-          if (newType == curType)
+        for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+          if (!FORWARD_TRANSITIONS[curType][newType])
             continue;
           if (!canPlace(present, newType))
             continue;
