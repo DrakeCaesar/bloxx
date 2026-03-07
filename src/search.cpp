@@ -367,7 +367,10 @@ inline void printBuildPath(StateType bestState, const MapType &visited) {
     cur = tr.parent;
   }
   reverse(steps.begin(), steps.end());
-  printExpandedPath(expandPathForEmptyBoard(steps), g_baseState);
+  if (PATH_FROM_EMPTY)
+    printExpandedPath(steps, StateType(0));
+  else
+    printExpandedPath(expandPathForEmptyBoard(steps), g_baseState);
 }
 
 struct SearchResult {
@@ -390,8 +393,10 @@ bfsShortestPath(StateType target) {
   vector<Entry> q;
   size_t head = 0;
 
-  path[g_baseState] = {g_baseState, -1, -1};
-  q.push_back({g_baseState, 0});
+  StateType bfsStart = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+  path[bfsStart] = {bfsStart, -1, -1};
+  q.push_back({bfsStart, 0});
+  const int bfsTypeMin = PATH_FROM_EMPTY ? 0 : 1;
 
   while (head < q.size()) {
     auto [cur, curScore] = q[head++];
@@ -402,7 +407,7 @@ bfsShortestPath(StateType target) {
       if (curType == 5)
         continue;
       uint32_t present = neighborPresent(cur, pos);
-      for (int newType = 1; newType <= g_maxType[pos]; newType++) {
+      for (int newType = bfsTypeMin; newType <= g_maxType[pos]; newType++) {
         if (newType == curType)
           continue;
         if (!canPlace(present, newType))
@@ -1296,13 +1301,15 @@ void runSingleLevel() {
     vector<Entry> q;
     size_t head = 0;
 
-    StateType startState = g_baseState;
-    visited[startState] = {g_baseState, -1, -1};
+    StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+    visited[startState] = {startState, -1, -1};
     q.push_back({startState, 0});
 
     result.bestState = startState;
     result.bestScore = 0;
     result.explored = 0;
+
+    const int typeMin = PATH_FROM_EMPTY ? 0 : 1;
 
     while ((SEARCH_MODE == 0) ? (head < q.size()) : !q.empty()) {
       Entry curEntry;
@@ -1328,7 +1335,7 @@ void runSingleLevel() {
         if (curType == 5)
           continue;
         uint32_t present = neighborPresent(cur, pos); // computed once per pos
-        for (int newType = 1; newType <= g_maxType[pos]; newType++) {
+        for (int newType = typeMin; newType <= g_maxType[pos]; newType++) {
           if (newType == curType)
             continue;
           if (!canPlace(present, newType))
