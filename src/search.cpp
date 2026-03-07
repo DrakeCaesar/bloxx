@@ -1367,7 +1367,13 @@ void runSingleLevel() {
   cout << "Optimal layout:\n";
   printGrid(result.bestState);
 
-  // Path reconstruction only available for BFS
+  // Path reconstruction: BFS already has the path in the visited map; no
+  // reverse BFS. Redirect to baseline file when generating baselines (mode 3
+  // does its own redirect inside buildPathFromReverseBfs).
+  if (g_baselineFile && g_baselineFile->is_open() && SEARCH_MODE != 3) {
+    g_originalCoutBuf = cout.rdbuf();
+    cout.rdbuf(g_baselineFile->rdbuf());
+  }
   if (SEARCH_MODE == 0) {
     printBuildPath(result.bestState, visited);
   } else if (SEARCH_MODE == 3) {
@@ -1376,5 +1382,9 @@ void runSingleLevel() {
     cout << "\nFinding shortest build path via BFS...\n";
     auto pathMap = bfsShortestPath(result.bestState);
     printBuildPath(result.bestState, pathMap);
+  }
+  if (g_originalCoutBuf) {
+    cout.rdbuf(g_originalCoutBuf);
+    g_originalCoutBuf = nullptr;
   }
 }
