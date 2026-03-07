@@ -185,40 +185,59 @@ static vector<pair<int, int>>
 expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
   vector<pair<int, int>> out;
   out.reserve(steps.size() * 2);
-  uint64_t placed = 0; // bit i = position i has been explicitly placed
-  StateType phys = g_baseState; // canonical state — mirrors what printExpandedPath tracks
+  uint64_t placed = 0; // bit i = physical position i has been explicitly placed
+
+  // Track both states exactly like printExpandedPath does.
+  StateType canonState = g_baseState;
+  StateType physState  = g_baseState;
 
   for (auto [pos, newType] : steps) {
-    // For each required neighbor type req in 1..newType-1,
-    // ensure at least one placed neighbor has that type.
-    // Unplaced neighbors with type 1 are "implicit blue" in the solver model;
-    // insert an explicit place-blue step for one such neighbor if needed.
+    // Find which symmetry maps physState to its canonical form.
+    int usedSymm = 0;
+    for (int k = 0; k < g_numSymm; k++) {
+      if (applyPerm(physState, g_symmPerm[k]) == canonState) {
+        usedSymm = k;
+        break;
+      }
+    }
+    // perm[i]    = canonical position of physical position i
+    // invPerm[j] = physical position of canonical position j
+    int invPerm[49];
+    for (int i = 0; i < g_numPos; i++)
+      invPerm[g_symmPerm[usedSymm][i]] = i;
+    int physPos = invPerm[pos];
+
+    // For each required neighbor type req in 1..newType-1, ensure at least one
+    // placed physical neighbor has that type. Unplaced neighbors with type 1
+    // are "implicit blue"; insert an explicit place-blue step if needed.
     for (int req = 1; req < newType; req++) {
       bool satisfied = false;
-      int candidateNb = -1;
-      for (int nb : GRID.neighbors[pos]) {
-        int nbType = stateGet(phys, nb);
+      int candidatePhysNb = -1;
+      for (int physNb : GRID.neighbors[physPos]) {
+        int nbType = stateGet(physState, physNb);
         if (nbType == req) {
-          if ((placed >> nb) & 1) {
-            satisfied = true; // already explicitly placed with correct type
+          if ((placed >> physNb) & 1) {
+            satisfied = true;
             break;
           } else if (req == 1) {
-            // Implicit blue (unplaced, type 1) — can satisfy req=1 once placed
-            candidateNb = nb;
+            candidatePhysNb = physNb;
           }
         }
       }
-      if (!satisfied && candidateNb != -1) {
-        out.push_back({candidateNb, 1});
-        placed |= (1ull << candidateNb);
-        // Blue placements don't change canonical state (1 is already 1)
+      if (!satisfied && candidatePhysNb != -1) {
+        // Express the placement in canonical space for printExpandedPath.
+        // Blue placements don't change canonState (already 1), so usedSymm
+        // stays stable for this step.
+        int canonNb = g_symmPerm[usedSymm][candidatePhysNb];
+        out.push_back({canonNb, 1});
+        placed |= (1ull << candidatePhysNb);
       }
     }
 
-    // Execute the actual step — keep phys canonical to mirror BFS state space
     out.push_back({pos, newType});
-    placed |= (1ull << pos);
-    phys = canonical(stateSet(phys, pos, newType));
+    placed    |= (1ull << physPos);
+    canonState = canonical(stateSet(canonState, pos, newType));
+    physState  = stateSet(physState, physPos, newType);
   }
 
   return out;
