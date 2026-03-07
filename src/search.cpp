@@ -224,10 +224,12 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
   return out;
 }
 
-static void printExpandedPath(const vector<pair<int, int>> &expandedSteps) {
-  StateType canonState = g_baseState;   // canonical state — for validity checks
-  StateType displayState = g_baseState; // physical state — stable orientation for display
-  uint64_t placedMask = 0;              // physical positions that have been placed
+static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
+                              StateType startState) {
+  const bool fromEmpty = (startState == StateType(0));
+  StateType canonState = startState;
+  StateType displayState = startState;
+  uint64_t placedMask = 0;
 
   auto advanceState = [&](int pos, int newType) {
     int usedSymm = 0;
@@ -247,25 +249,28 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps) {
     placedMask |= (1ull << physPos);
   };
 
-  // Pre-pass to compute total steps including trailing implicit blues.
+  // Pre-pass to compute total steps (and trailing implicit blues when from all-1).
   for (auto [pos, newType] : expandedSteps)
     advanceState(pos, newType);
 
-  int missingCount = 0;
-  for (int i = 0; i < g_numPos; i++) {
-    if (!((placedMask >> i) & 1))
-      missingCount++;
+  int totalSteps = (int)expandedSteps.size();
+  if (!fromEmpty) {
+    int missingCount = 0;
+    for (int i = 0; i < g_numPos; i++) {
+      if (!((placedMask >> i) & 1))
+        missingCount++;
+    }
+    totalSteps += missingCount;
   }
-  int totalSteps = (int)expandedSteps.size() + missingCount;
 
   // Reset for actual print pass.
-  canonState = g_baseState;
-  displayState = g_baseState;
+  canonState = startState;
+  displayState = startState;
   placedMask = 0;
 
   cout << "\n--- Build path (" << totalSteps << " steps) ---\n\n";
-  cout << "Start (empty board):\n";
-  printGrid(g_baseState, uint64_t(0));
+  cout << "Start (" << (fromEmpty ? "empty" : "all blue") << " board):\n";
+  printGrid(startState, uint64_t(0));
   int validSteps = 0, invalidSteps = 0;
   int stepNum = 1;
 
@@ -321,22 +326,23 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps) {
     stepNum++;
   }
 
-  // Any physical position never explicitly placed is an implicit blue that
-  // stayed blue the entire game. Show a final step for each one.
-  for (int i = 0; i < g_numPos; i++) {
-    if (!((placedMask >> i) & 1)) {
-      placedMask |= (1ull << i);
-      // displayState already has 1 (blue) at this position
-      auto [r, c] = GRID.positions[i];
-      cout << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c
-           << ")  ";
-      cout << "empty -> " << COLORS[1] << BLACK_TEXT << COLOR_NAMES[1] << RESET
-           << " (1)";
-      cout << "  \033[32m\u2713\033[0m"
-           << "\n";
-      printGrid(displayState, placedMask);
-      stepNum++;
-      validSteps++;
+  // When path started from all-blue: any position never explicitly placed is an
+  // implicit blue; show a final step for each.
+  if (!fromEmpty) {
+    for (int i = 0; i < g_numPos; i++) {
+      if (!((placedMask >> i) & 1)) {
+        placedMask |= (1ull << i);
+        auto [r, c] = GRID.positions[i];
+        cout << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c
+             << ")  ";
+        cout << "empty -> " << COLORS[1] << BLACK_TEXT << COLOR_NAMES[1]
+             << RESET << " (1)";
+        cout << "  \033[32m\u2713\033[0m"
+             << "\n";
+        printGrid(displayState, placedMask);
+        stepNum++;
+        validSteps++;
+      }
     }
   }
 
@@ -361,7 +367,7 @@ inline void printBuildPath(StateType bestState, const MapType &visited) {
     cur = tr.parent;
   }
   reverse(steps.begin(), steps.end());
-  printExpandedPath(expandPathForEmptyBoard(steps));
+  printExpandedPath(expandPathForEmptyBoard(steps), g_baseState);
 }
 
 struct SearchResult {
@@ -412,11 +418,13 @@ bfsShortestPath(StateType target) {
   return path;
 }
 
-// Reverse BFS from a final state to base (all zeros).
-// A tower can be removed if its placement requirements are met in the
-// current state. The prior type at that position can be any other value,
-// without needing to satisfy its own placement requirements.
+// Reverse BFS from a final state to base (empty or all-blue depending on
+// PATH_FROM_EMPTY). A tower can be removed if its placement requirements are
+// met in the current state.
 static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
+  const StateType pathStartState =
+      PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+
   ankerl::unordered_dense::map<StateType, Transition> parentForward;
   ankerl::unordered_dense::map<StateType, Transition> parentReverse;
   parentForward.reserve(1ull << 26); // ~64M elements
@@ -426,10 +434,12 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   const int kPruneLowDelta = 3;
   const int kPruneHighDelta = 3;
 
-  auto countTowersLeft = [](StateType s) {
+  // Tower count for pruning: non-empty when PATH_FROM_EMPTY, non-blue otherwise
+  auto countTowersLeft = [pathStartState](StateType s) {
     int towersLeft = 0;
+    int targetType = PATH_FROM_EMPTY ? 0 : 1;
     for (int pos = 0; pos < g_numPos; pos++) {
-      if (stateGet(s, pos) != 1)
+      if (stateGet(s, pos) != targetType)
         towersLeft++;
     }
     return towersLeft;
@@ -505,8 +515,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   std::deque<QueueEntry> qForward;
   std::deque<QueueEntry> qReverse;
 
-  parentForward[g_baseState] = {g_baseState, -1, -1};
-  qForward.push_back({g_baseState, 0});
+  parentForward[pathStartState] = {pathStartState, -1, -1};
+  qForward.push_back({pathStartState, countTowersLeft(pathStartState)});
   parentReverse[finalState] = {finalState, -1, -1};
   qReverse.push_back({finalState, countTowersLeft(finalState)});
 
@@ -525,26 +535,31 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   // Expand a range of (cur, curTowers) into a list of new states (no shared map
   // writes).
+  const int reverseSkipType = PATH_FROM_EMPTY ? 0 : 1;
+  const int reversePrevMin = PATH_FROM_EMPTY ? 0 : 1;
+
   auto reverseExpandChunk = [&](const QueueEntry *start, const QueueEntry *end,
                                 vector<ReverseExpansion> *out) {
     for (; start != end; ++start) {
       StateType cur = start->first;
       int curTowers = start->second;
-      if (cur == g_baseState)
+      if (cur == pathStartState)
         continue;
       for (int pos = 0; pos < g_numPos; pos++) {
         int curType = stateGet(cur, pos);
-        if (curType == 1)
+        if (curType == reverseSkipType)
           continue;
         uint32_t present = neighborPresent(cur, pos);
         if (!canPlace(present, curType))
           continue;
-        for (int prevType = 1; prevType <= g_maxType[pos]; prevType++) {
+        for (int prevType = reversePrevMin; prevType <= g_maxType[pos];
+             prevType++) {
           if (prevType == curType)
             continue;
           StateType next = canonical(stateSet(cur, pos, prevType));
           int nextTowers =
-              curTowers - (curType != 1 ? 1 : 0) + (prevType != 1 ? 1 : 0);
+              curTowers - (curType != reverseSkipType ? 1 : 0) +
+              (prevType != reverseSkipType ? 1 : 0);
           out->push_back({next, Transition{cur, (int8_t)pos, (int8_t)curType},
                           nextTowers});
         }
@@ -579,7 +594,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
       int maxTowersLeft = 0;
       bool reachedBase = false;
       for (const auto &entry : layer) {
-        if (entry.first == g_baseState) {
+        if (entry.first == pathStartState) {
           reachedBase = true;
           break;
         }
@@ -714,8 +729,11 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
                     .emplace(next,
                              Transition{cur, (int8_t)pos, (int8_t)newType})
                     .second) {
-              int nextTowers =
-                  curTowers - (curType != 1 ? 1 : 0) + (newType != 1 ? 1 : 0);
+              int nextTowers = PATH_FROM_EMPTY
+                                  ? (curTowers + (newType != 0 ? 1 : 0) -
+                                     (curType != 0 ? 1 : 0))
+                                  : (curTowers - (curType != 1 ? 1 : 0) +
+                                     (newType != 1 ? 1 : 0));
               qForward.push_back({next, nextTowers});
             }
           }
@@ -799,7 +817,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     return d;
   };
 
-  StateType meetState = g_baseState;
+  StateType meetState = pathStartState;
   int bestTotal = INT_MAX;
   size_t interceptCount = 0;
   for (const auto &kv : parentForward) {
@@ -860,8 +878,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     // so their indices can differ at multiple positions. Search for the step
     // (pos, type) such that canonical(stateSet(cur, pos, type)) == parent.
     bool foundStep = false;
+    int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
     for (int p = 0; p < g_numPos && !foundStep; p++) {
-      for (int t = 1; t <= g_maxType[p] && !foundStep; t++) {
+      for (int t = stepTypeMin; t <= g_maxType[p] && !foundStep; t++) {
         if (t == stateGet(cur, p))
           continue;
         if (canonical(stateSet(cur, p, t)) == parent) {
@@ -1152,7 +1171,10 @@ static SearchResult runSlidingWindow() {
     return result;
   }
 
-  printExpandedPath(expandPathForEmptyBoard(buildPath));
+  if (PATH_FROM_EMPTY)
+    printExpandedPath(buildPath, StateType(0));
+  else
+    printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState);
 
   cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0;
