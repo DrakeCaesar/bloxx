@@ -80,6 +80,71 @@ template <> struct hash<uint128_simd> {
 };
 } // namespace robin_hood
 
+// ── Dynamic storage type ──────────────────────────────────────────────────────
+// Levels 1+2 (numPos ≤ 16): state ≤ 48 bits; packed fits in top byte of
+// uint64_t (bits 56-63). Storing 8 bytes instead of 16 halves memory again.
+// Levels 3-5 (numPos > 16): keep current StateType storage (bits 120-127).
+//
+// All BFS state operations (stateGet, canonical, …) always use StateType.
+// Only the visited/parent SET keys are stored as the narrower uint64_t.
+// Conversion boundary is at insert/find time via the helpers below.
+
+// Defined after g_numPos (declared below in the globals section).
+inline bool usesStorage64();
+
+// Pure StateType → storage key (strips any packed bits, narrows if needed).
+template <typename S> inline S toStorageKey(StateType s);
+template <> inline uint64_t toStorageKey<uint64_t>(StateType s) { return s.u.lo; }
+template <> inline StateType toStorageKey<StateType>(StateType s) { return s; }
+
+// Encode pure state + transition into a storage element.
+template <typename S> inline S encodeForStorage(StateType state, Transition tr);
+template <>
+inline uint64_t encodeForStorage<uint64_t>(StateType state, Transition tr) {
+  return state.u.lo | ((uint64_t)tr.packed << 56);
+}
+template <>
+inline StateType encodeForStorage<StateType>(StateType state, Transition tr) {
+  return encodeTransition(state, tr);
+}
+
+// Decode storage element → pure canonical StateType (strips packed bits).
+template <typename S> inline StateType storageToState(S s);
+template <> inline StateType storageToState<uint64_t>(uint64_t s) {
+  return StateType(s & 0x00FFFFFFFFFFFFFFull, 0);
+}
+template <> inline StateType storageToState<StateType>(StateType s) {
+  return s & STATE_MASK;
+}
+
+// Decode storage element → Transition.
+template <typename S> inline Transition storageTrans(S s);
+template <> inline Transition storageTrans<uint64_t>(uint64_t s) {
+  Transition t;
+  t.packed = static_cast<uint8_t>(s >> 56);
+  return t;
+}
+template <> inline Transition storageTrans<StateType>(StateType s) {
+  return decodeTransition(s);
+}
+
+// Per-storage hash and equality (ignore packed bits in either representation).
+template <typename S> struct StorageHash;
+template <> struct StorageHash<uint64_t> {
+  size_t operator()(uint64_t x) const noexcept {
+    return std::hash<uint64_t>{}(x & 0x00FFFFFFFFFFFFFFull);
+  }
+};
+template <> struct StorageHash<StateType> : StateHash {};
+
+template <typename S> struct StorageEqual;
+template <> struct StorageEqual<uint64_t> {
+  bool operator()(uint64_t a, uint64_t b) const noexcept {
+    return (a & 0x00FFFFFFFFFFFFFFull) == (b & 0x00FFFFFFFFFFFFFFull);
+  }
+};
+template <> struct StorageEqual<StateType> : StateEqual {};
+
 // ── Hot-path lookup tables ──────────────────────────────────────────────────
 // Flat fixed-size arrays eliminate vector pointer indirection in the inner
 // loop. Max grid 7×7 = 49 positions, max 4 orthogonal neighbors each. Neighbor
@@ -95,6 +160,9 @@ static int g_maxType[49];
 static StateType g_baseState; // all positions set to type 1 (Blue)
 // Type T requires neighbors of types 1..T-1: mask = bits 1..T-1 set
 static const uint32_t g_requiredMask[6] = {0, 0, 2, 6, 14, 30};
+
+// usesStorage64() forward-declared above; defined here after g_numPos.
+inline bool usesStorage64() { return g_numPos <= 16; }
 
 // ── Symmetry ────────────────────────────────────────────────────────────────
 // Auto-detects valid symmetries by trying all 8 dihedral transforms against
@@ -443,12 +511,15 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
   cout << "\nReached score: " << reachedScore << "\n";
 }
 
-template <typename SetType>
-inline void printBuildPath(StateType bestState, const SetType &visited) {
+template <typename S>
+inline void printBuildPath(
+    StateType bestState,
+    const robin_hood::unordered_set<S, StorageHash<S>, StorageEqual<S>>
+        &visited) {
   vector<pair<int, int>> steps; // (pos, newType)
   StateType cur = bestState;
   while (true) {
-    auto tr = decodeTransition(*visited.find(cur));
+    auto tr = storageTrans<S>(*visited.find(toStorageKey<S>(cur)));
     if (tr.getPos() == -1)
       break;
     int childPos = tr.getPos();
@@ -515,12 +586,14 @@ bfsShortestPath(StateType target) {
 // Reverse BFS from a final state back to the path start (empty or all-blue
 // depending on PATH_FROM_EMPTY). Used by mode 1 (Sliding Window) for path
 // reconstruction since the search itself doesn't store transitions.
-static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
+// S = uint64_t for levels 1+2 (state ≤ 48 bits), StateType for 3-5.
+template <typename S>
+static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) {
   const StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
 
-  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> parentReverse;
+  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> parentReverse;
   parentReverse.reserve(1ull << 26); // ~64M elements
-  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> parentForward;
+  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> parentForward;
   if (RUN_PARALLEL_FORWARD_BFS)
     parentForward.reserve(1ull << 26); // ~64M elements
 
@@ -586,21 +659,22 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     SetType pruned;
     pruned.reserve(toProcess.size() * 4);
     for (const auto &entry : toProcess)
-      pruned.emplace(*parentMap.find(entry.first));
+      pruned.emplace(*parentMap.find(toStorageKey<S>(entry.first)));
 
     std::deque<QueueEntry> worklist(toProcess.begin(), toProcess.end());
     while (!worklist.empty()) {
       StateType cur = worklist.front().first;
       worklist.pop_front();
-      auto it = parentMap.find(cur);
+      auto it = parentMap.find(toStorageKey<S>(cur));
       if (it == parentMap.end())
         continue;
-      auto tr = decodeTransition(*it);
+      auto tr = storageTrans<S>(*it);
       if (tr.getPos() == -1)
         continue;
       StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
-      if (parentMap.count(parent) && pruned.find(parent) == pruned.end()) {
-        pruned.emplace(*parentMap.find(parent));
+      if (parentMap.count(toStorageKey<S>(parent)) &&
+          pruned.find(toStorageKey<S>(parent)) == pruned.end()) {
+        pruned.emplace(*parentMap.find(toStorageKey<S>(parent)));
         worklist.push_back({parent, countTowersLeft(parent)});
       }
     }
@@ -612,10 +686,10 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   std::deque<QueueEntry> qReverse;
   std::deque<QueueEntry> qForward;
   if (RUN_PARALLEL_FORWARD_BFS) {
-    parentForward.emplace(encodeTransition(pathStartState, {}));
+    parentForward.emplace(encodeForStorage<S>(pathStartState, {}));
     qForward.push_back({pathStartState, countTowersLeft(pathStartState)});
   }
-  parentReverse.emplace(encodeTransition(finalState, {}));
+  parentReverse.emplace(encodeForStorage<S>(finalState, {}));
   qReverse.push_back({finalState, countTowersLeft(finalState)});
 
   std::mutex coutMutex;
@@ -630,10 +704,9 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   // canonical(stateSet(cur, p, t)) == parent because canonical frames may
   // differ.
 
-  // Result of expanding one state in reverse: (next state with transition
-  // embedded in its top byte, next tower count).
+  // Result of expanding one state in reverse: (encoded storage element, towers).
   struct ReverseExpansion {
-    StateType next; // canonical pure state | (Transition.packed << 120)
+    S next; // encodeForStorage<S>(canonical pure state, transition)
     int nextTowers;
   };
 
@@ -663,7 +736,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
           int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
                            (prevType != reverseBaseType ? 1 : 0);
           out->push_back(
-              {encodeTransition(next, Transition{(int8_t)childPos, (int8_t)curType}),
+              {encodeForStorage<S>(next,
+                                   Transition{(int8_t)childPos, (int8_t)curType}),
                nextTowers});
         }
       }
@@ -744,7 +818,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
         for (const auto &r : results[c]) {
           if (parentReverse.emplace(r.next).second) {
             totalReverseVisited++;
-            qReverse.push_back({r.next & STATE_MASK, r.nextTowers});
+            qReverse.push_back({storageToState<S>(r.next), r.nextTowers});
           }
         }
       }
@@ -829,13 +903,13 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
             auto [next, childPos] =
                 canonicalAndChildPos(stateSet(cur, pos, newType), pos);
             if (parentForward
-                    .emplace(encodeTransition(
+                    .emplace(encodeForStorage<S>(
                         next, Transition{(int8_t)childPos, (int8_t)curType}))
                     .second) {
               int nextTowers = curTowers -
                                (curType != reverseBaseType ? 1 : 0) +
                                (newType != reverseBaseType ? 1 : 0);
-              qForward.push_back({next & STATE_MASK, nextTowers});
+              qForward.push_back({storageToState<S>(next), nextTowers});
             }
           }
         }
@@ -914,7 +988,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   if (!RUN_PARALLEL_FORWARD_BFS) {
     // Walk from pathStartState toward finalState following the reverse BFS tree.
-    if (parentReverse.count(pathStartState) == 0) {
+    if (parentReverse.count(toStorageKey<S>(pathStartState)) == 0) {
       lock_guard<mutex> lock(coutMutex);
       cout << "[Main] Reverse BFS did not reach path start. Cannot build path."
            << endl;
@@ -922,7 +996,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
     }
     StateType cur = pathStartState;
     while (cur != finalState) {
-      auto tr = decodeTransition(*parentReverse.find(cur));
+      auto tr = storageTrans<S>(*parentReverse.find(toStorageKey<S>(cur)));
       StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
       bool foundStep = false;
       int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
@@ -945,8 +1019,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   auto forwardDepthOf = [&parentForward](StateType s) {
     int d = 0;
     StateType cur = s;
-    while (parentForward.count(cur)) {
-      auto tr = decodeTransition(*parentForward.find(cur));
+    while (parentForward.count(toStorageKey<S>(cur))) {
+      auto tr = storageTrans<S>(*parentForward.find(toStorageKey<S>(cur)));
       if (tr.getPos() == -1)
         break;
       cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
@@ -957,8 +1031,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   auto reverseDepthOf = [&parentReverse](StateType s) {
     int d = 0;
     StateType cur = s;
-    while (parentReverse.count(cur)) {
-      auto tr = decodeTransition(*parentReverse.find(cur));
+    while (parentReverse.count(toStorageKey<S>(cur))) {
+      auto tr = storageTrans<S>(*parentReverse.find(toStorageKey<S>(cur)));
       if (tr.getPos() == -1)
         break;
       cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
@@ -971,8 +1045,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   int bestTotal = INT_MAX;
   size_t interceptCount = 0;
   for (const auto &elem : parentForward) {
-    StateType s = elem & STATE_MASK;
-    if (parentReverse.count(s) == 0)
+    StateType s = storageToState<S>(elem);
+    if (parentReverse.count(toStorageKey<S>(s)) == 0)
       continue;
     interceptCount++;
     int fd = forwardDepthOf(s);
@@ -1005,7 +1079,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   {
     StateType cur = meetState;
     while (true) {
-      auto tr = decodeTransition(*parentForward.find(cur));
+      auto tr = storageTrans<S>(*parentForward.find(toStorageKey<S>(cur)));
       if (tr.getPos() == -1)
         break;
       int childPos = tr.getPos();
@@ -1019,7 +1093,7 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
   {
     StateType cur = meetState;
     while (true) {
-      auto tr = decodeTransition(*parentReverse.find(cur));
+      auto tr = storageTrans<S>(*parentReverse.find(toStorageKey<S>(cur)));
       if (tr.getPos() == -1)
         break;
       StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
@@ -1041,6 +1115,14 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
 
   steps.insert(steps.begin(), stepsForward.begin(), stepsForward.end());
   return steps;
+}
+
+// Runtime dispatch: use uint64_t storage for levels 1+2, StateType for 3-5.
+static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
+  if (usesStorage64())
+    return buildPathFromReverseBfsImpl<uint64_t>(finalState);
+  else
+    return buildPathFromReverseBfsImpl<StateType>(finalState);
 }
 
 // ── Sliding Window Optimization ─────────────────────────────────────────────-
@@ -1334,6 +1416,79 @@ static SearchResult runSlidingWindow() {
   return result;
 }
 
+// BFS over all reachable states.  S = uint64_t for levels 1+2, StateType for
+// levels 3+.  Populates result and writes path reconstruction to cout (which
+// may be redirected to the baseline file by the caller).
+template <typename S>
+static void runBFSSearch(SearchResult &result) {
+  robin_hood::unordered_set<S, StorageHash<S>, StorageEqual<S>> visited;
+  visited.reserve(1ull << 24);
+
+  struct Entry {
+    StateType state;
+    int score;
+  };
+  vector<Entry> q;
+  size_t head = 0;
+
+  StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+  visited.emplace(encodeForStorage<S>(startState, {})); // sentinel: no parent
+  q.push_back({startState, 0});
+
+  result.bestState = startState;
+  result.bestScore = 0;
+  result.explored = 0;
+
+  while (head < q.size()) {
+    auto [cur, curScore] = q[head++];
+    result.explored++;
+
+    if (curScore > result.bestScore) {
+      result.bestScore = curScore;
+      result.bestState = cur;
+      cout << "New best score: " << result.bestScore << "\n";
+      printGrid(cur);
+    }
+
+    for (int pos = 0; pos < g_numPos; pos++) {
+      int curType = stateGet(cur, pos);
+      uint32_t present = neighborPresent(cur, pos);
+      for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+        if (!FORWARD_TRANSITIONS[curType][newType])
+          continue;
+        if (!canPlace(present, newType))
+          continue;
+
+        auto [next, childPos] =
+            canonicalAndChildPos(stateSet(cur, pos, newType), pos);
+        int nextScore = curScore + (newType - curType);
+        if (visited
+                .emplace(encodeForStorage<S>(
+                    next, Transition{(int8_t)childPos, (int8_t)curType}))
+                .second)
+          q.push_back({next, nextScore});
+      }
+    }
+
+    if (result.explored % 2000000 == 0)
+      cout << "Explored: " << result.explored
+           << " | Visited: " << visited.size()
+           << " | Best: " << result.bestScore << "\r" << flush;
+  }
+
+  result.uniqueStates = visited.size();
+
+  if (g_baselineFile && g_baselineFile->is_open()) {
+    g_originalCoutBuf = cout.rdbuf();
+    cout.rdbuf(g_baselineFile->rdbuf());
+  }
+  printBuildPath<S>(result.bestState, visited);
+  if (g_originalCoutBuf) {
+    cout.rdbuf(g_originalCoutBuf);
+    g_originalCoutBuf = nullptr;
+  }
+}
+
 // ── Public entrypoint for a single level/unlocked-type configuration ────────
 
 void runSingleLevel() {
@@ -1353,66 +1508,15 @@ void runSingleLevel() {
   buildSymmetries();
 
   SearchResult result{g_baseState, 0, 0, 0};
-  robin_hood::unordered_set<StateType> visited;
-  visited.reserve(1ull << 24); // ~16M elements
 
   if (SEARCH_MODE == 1) {
     result = runSlidingWindow();
   } else {
-    // BFS: every state is visited exactly once via a queue with a head index.
-    struct Entry {
-      StateType state;
-      int score;
-    };
-    vector<Entry> q;
-    size_t head = 0;
-
-    StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
-    visited.emplace(encodeTransition(startState, {})); // sentinel
-    q.push_back({startState, 0});
-
-    result.bestState = startState;
-    result.bestScore = 0;
-    result.explored = 0;
-
-    while (head < q.size()) {
-      auto [cur, curScore] = q[head++];
-      result.explored++;
-
-      if (curScore > result.bestScore) {
-        result.bestScore = curScore;
-        result.bestState = cur;
-        cout << "New best score: " << result.bestScore << "\n";
-        printGrid(cur);
-      }
-
-      for (int pos = 0; pos < g_numPos; pos++) {
-        int curType = stateGet(cur, pos);
-        uint32_t present = neighborPresent(cur, pos);
-        for (int newType = 0; newType <= g_maxType[pos]; newType++) {
-          if (!FORWARD_TRANSITIONS[curType][newType])
-            continue;
-          if (!canPlace(present, newType))
-            continue;
-
-          auto [next, childPos] =
-              canonicalAndChildPos(stateSet(cur, pos, newType), pos);
-          int nextScore = curScore + (newType - curType);
-          if (visited
-                  .emplace(encodeTransition(
-                      next, Transition{(int8_t)childPos, (int8_t)curType}))
-                  .second)
-            q.push_back({next, nextScore});
-        }
-      }
-
-      if (result.explored % 2000000 == 0)
-        cout << "Explored: " << result.explored
-             << " | Visited: " << visited.size()
-             << " | Best: " << result.bestScore << "\r" << flush;
-    }
-
-    result.uniqueStates = visited.size();
+    // Dispatch to the appropriately-typed BFS (uint64_t for levels 1+2, StateType for 3+).
+    if (usesStorage64())
+      runBFSSearch<uint64_t>(result);
+    else
+      runBFSSearch<StateType>(result);
   }
 
   cout << (SEARCH_MODE == 1 ? "\nSliding window complete.\n"
@@ -1423,18 +1527,6 @@ void runSingleLevel() {
   cout << "Optimal layout:\n";
   printGrid(result.bestState);
 
-  // Path reconstruction. Redirect to baseline file for mode 0 (mode 1 does
-  // its own redirect inside buildPathFromReverseBfs).
-  if (SEARCH_MODE == 0) {
-    if (g_baselineFile && g_baselineFile->is_open()) {
-      g_originalCoutBuf = cout.rdbuf();
-      cout.rdbuf(g_baselineFile->rdbuf());
-    }
-    printBuildPath(result.bestState, visited);
-    if (g_originalCoutBuf) {
-      cout.rdbuf(g_originalCoutBuf);
-      g_originalCoutBuf = nullptr;
-    }
-  }
-  // Mode 1: path already printed by runSlidingWindow
+  // Mode 0: path already printed by runBFSSearch above.
+  // Mode 1: path already printed by runSlidingWindow.
 }
