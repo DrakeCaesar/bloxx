@@ -189,7 +189,7 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
 
   // Track both states exactly like printExpandedPath does.
   StateType canonState = g_baseState;
-  StateType physState  = g_baseState;
+  StateType physState = g_baseState;
 
   for (auto [pos, newType] : steps) {
     // Find which symmetry maps physState to its canonical form.
@@ -235,9 +235,9 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
     }
 
     out.push_back({pos, newType});
-    placed    |= (1ull << physPos);
+    placed |= (1ull << physPos);
     canonState = canonical(stateSet(canonState, pos, newType));
-    physState  = stateSet(physState, physPos, newType);
+    physState = stateSet(physState, physPos, newType);
   }
 
   return out;
@@ -268,7 +268,8 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
     placedMask |= (1ull << physPos);
   };
 
-  // Pre-pass to compute total steps (and trailing implicit blues when from all-1).
+  // Pre-pass to compute total steps (and trailing implicit blues when from
+  // all-1).
   for (auto [pos, newType] : expandedSteps)
     advanceState(pos, newType);
 
@@ -446,8 +447,7 @@ bfsShortestPath(StateType target) {
 // depending on PATH_FROM_EMPTY). Used by mode 1 (Sliding Window) for path
 // reconstruction since the search itself doesn't store transitions.
 static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
-  const StateType pathStartState =
-      PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+  const StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
 
   ankerl::unordered_dense::map<StateType, Transition> parentForward;
   ankerl::unordered_dense::map<StateType, Transition> parentReverse;
@@ -578,9 +578,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
           if (prevType == curType)
             continue;
           StateType next = canonical(stateSet(cur, pos, prevType));
-          int nextTowers =
-              curTowers - (curType != baseType ? 1 : 0) +
-              (prevType != baseType ? 1 : 0);
+          int nextTowers = curTowers - (curType != baseType ? 1 : 0) +
+                           (prevType != baseType ? 1 : 0);
           out->push_back({next, Transition{cur, (int8_t)pos, (int8_t)curType},
                           nextTowers});
         }
@@ -630,7 +629,8 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
                 .count();
         lock_guard<mutex> lock(coutMutex);
         cout << "[Reverse] Layer " << depth << " done in " << expandMs
-             << " ms (expand " << expandMs << " ms). Reached base state." << endl;
+             << " ms (expand " << expandMs << " ms). Reached base state."
+             << endl;
         break;
       }
 
@@ -751,10 +751,10 @@ static vector<pair<int, int>> buildPathFromReverseBfs(StateType finalState) {
                              Transition{cur, (int8_t)pos, (int8_t)newType})
                     .second) {
               int nextTowers = PATH_FROM_EMPTY
-                                  ? (curTowers + (newType != 0 ? 1 : 0) -
-                                     (curType != 0 ? 1 : 0))
-                                  : (curTowers - (curType != 1 ? 1 : 0) +
-                                     (newType != 1 ? 1 : 0));
+                                   ? (curTowers + (newType != 0 ? 1 : 0) -
+                                      (curType != 0 ? 1 : 0))
+                                   : (curTowers - (curType != 1 ? 1 : 0) +
+                                      (newType != 1 ? 1 : 0));
               qForward.push_back({next, nextTowers});
             }
           }
@@ -1292,7 +1292,8 @@ void runSingleLevel() {
     result.uniqueStates = visited.size();
   }
 
-  cout << (SEARCH_MODE == 1 ? "\nSliding window complete.\n" : "\nBFS complete.\n");
+  cout << (SEARCH_MODE == 1 ? "\nSliding window complete.\n"
+                            : "\nBFS complete.\n");
   cout << "States explored : " << result.explored << "\n";
   cout << "Unique states   : " << result.uniqueStates << "\n";
   cout << "Best score      : " << result.bestScore << "\n\n";
