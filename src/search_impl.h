@@ -48,7 +48,7 @@ struct StateEqual {
   }
 };
 
-// robin_hood::hash<uint128_simd> is in search.cpp (used by BFS mode 0 only).
+// StateHash/StateEqual (and StorageHash/StorageEqual) are used for ankerl sets/maps.
 
 // ── Dynamic storage type ───────────────────────────────────────────────────
 inline bool usesStorage64();

@@ -17,15 +17,8 @@ else()
   set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -flto")
 endif()
 
-# Robin-hood hashing library
-include(FetchContent)
-FetchContent_Declare(robin_hood
-  GIT_REPOSITORY https://github.com/martinus/robin-hood-hashing.git
-  GIT_TAG 3.11.5
-)
-FetchContent_MakeAvailable(robin_hood)
-
 # Ankerl unordered_dense library
+include(FetchContent)
 FetchContent_Declare(unordered_dense
   GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
   GIT_TAG v4.8.1
@@ -33,5 +26,4 @@ FetchContent_Declare(unordered_dense
 FetchContent_MakeAvailable(unordered_dense)
 
 add_executable(tower_solver src/driver.cpp src/search.cpp src/search_bfs.cpp src/search_dfs.cpp)
-target_link_libraries(tower_solver PRIVATE robin_hood::robin_hood)
 target_include_directories(tower_solver PRIVATE ${unordered_dense_SOURCE_DIR}/include)

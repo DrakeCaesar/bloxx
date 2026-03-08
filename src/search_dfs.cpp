@@ -1,18 +1,18 @@
 #include "search_dfs.h"
-#include "search_impl.h"
-#include "search.h"
-#include "display.h"
 #include "config.h"
-#include "transition.h"
+#include "display.h"
+#include "search.h"
+#include "search_impl.h"
 
-#include <robin_hood.h>
+#include <ankerl/unordered_dense.h>
 #include <climits>
 #include <iostream>
 #include <vector>
 
 using namespace std;
 
-// Convert state sequence (path from start to goal) to build steps (pos, newType).
+// Convert state sequence (path from start to goal) to build steps (pos,
+// newType).
 static vector<pair<int, int>>
 stateSequenceToSteps(const vector<StateType> &path) {
   vector<pair<int, int>> steps;
@@ -41,10 +41,12 @@ stateSequenceToSteps(const vector<StateType> &path) {
 // Path = states only; parent = path[depth-1]. We only skip a state if we've
 // already reached it at a strictly shorter depth. When we improve (better
 // score or same score with shorter path) we store the full path.
-static void dfsVisit(
-    StateType cur, int curScore, int depth, vector<StateType> &path,
-    robin_hood::unordered_map<StateType, int, StateHash, StateEqual> &minDepth,
-    SearchResult &result, vector<StateType> &bestPath, int &bestPathLength) {
+static void
+dfsVisit(StateType cur, int curScore, int depth, vector<StateType> &path,
+         ankerl::unordered_dense::map<StateType, int, StateHash, StateEqual>
+             &minDepth,
+         SearchResult &result, vector<StateType> &bestPath,
+         int &bestPathLength) {
   result.explored++;
   int pathLen = (int)path.size() - 1;
   if (curScore > result.bestScore ||
@@ -83,7 +85,7 @@ static void dfsVisit(
 }
 
 void runDFSSearch(SearchResult &result) {
-  robin_hood::unordered_map<StateType, int, StateHash, StateEqual> minDepth;
+  ankerl::unordered_dense::map<StateType, int, StateHash, StateEqual> minDepth;
   minDepth.reserve(1ull << 22);
   vector<StateType> path;
   vector<StateType> bestPath;

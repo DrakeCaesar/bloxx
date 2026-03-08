@@ -1,8 +1,15 @@
 #pragma once
 
-#include <map>
+#include <ankerl/unordered_dense.h>
 
 #include "config.h"
+
+// Hash for pair<int,int> (ankerl has no std::pair hash by default).
+struct PairIntHash {
+  size_t operator()(const pair<int, int> &p) const noexcept {
+    return (size_t)p.first * 31U + (size_t)(unsigned)p.second;
+  }
+};
 
 // ════════════════════════════════════════════════════════════════════════════
 // Grid Configuration
@@ -12,7 +19,7 @@ struct GridConfig {
   int rows;
   int cols;
   vector<pair<int, int>> positions;    // list of (row, col) coords
-  map<pair<int, int>, int> coordToIdx; // coord -> position index
+  ankerl::unordered_dense::map<pair<int, int>, int, PairIntHash> coordToIdx; // coord -> position index
   vector<vector<int>> neighbors; // neighbors[idx] = list of neighbor indices
   vector<int> maxType;           // maxType[idx] = max tower type achievable
 

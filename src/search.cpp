@@ -2,7 +2,6 @@
 #include <chrono>
 #include <functional>
 #include <iostream>
-#include <robin_hood.h>
 #include <vector>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -20,16 +19,6 @@
 #include "transition.h"
 
 using namespace std;
-
-// Robin-hood set needs hash that ignores packed transition byte (search_impl.h
-// has StorageHash for ankerl; this is for robin_hood containers in BFS mode 0).
-namespace robin_hood {
-template <> struct hash<uint128_simd> {
-  size_t operator()(const uint128_simd &x) const noexcept {
-    return size_t(x.u.lo ^ (x.u.hi & 0x00FFFFFFFFFFFFFFull));
-  }
-};
-} // namespace robin_hood
 
 // Global file stream for baseline output (only used for reverse BFS section)
 ofstream *g_baselineFile = nullptr;
@@ -319,8 +308,8 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
 template <typename S>
 inline void
 printBuildPath(StateType bestState,
-               const robin_hood::unordered_set<S, StorageHash<S>,
-                                               StorageEqual<S>> &visited) {
+               const ankerl::unordered_dense::set<S, StorageHash<S>,
+                                                 StorageEqual<S>> &visited) {
   vector<pair<int, int>>
       steps; // (pos, newType) — pos in state *before* the move
   StateType cur = bestState;
@@ -365,8 +354,9 @@ void printBuildPathSteps(const vector<pair<int, int>> &buildPath) {
 // BFS from base state (all blue) stopping as soon as target is reached.
 // Returns a set of encoded states (transition packed into top byte) for path
 // reconstruction.
-inline robin_hood::unordered_set<StateType> bfsShortestPath(StateType target) {
-  robin_hood::unordered_set<StateType> path;
+inline ankerl::unordered_dense::set<StateType, StateHash, StateEqual>
+bfsShortestPath(StateType target) {
+  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> path;
   path.reserve(1ull << 24); // ~16M elements
   struct Entry {
     StateType state;
@@ -490,7 +480,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
 
   // Full BFS within window - explore ALL states reachable by modifying window
   // positions
-  robin_hood::unordered_set<StateType> localVisited;
+  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> localVisited;
   localVisited.reserve(1ull << 24); // ~16M elements per window
   struct Entry {
     StateType state;
@@ -698,7 +688,7 @@ static SearchResult runSlidingWindow() {
 // levels 3+.  Populates result and writes path reconstruction to cout (which
 // may be redirected to the baseline file by the caller).
 template <typename S> static void runBFSSearch(SearchResult &result) {
-  robin_hood::unordered_set<S, StorageHash<S>, StorageEqual<S>> visited;
+  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> visited;
   visited.reserve(1ull << 24);
 
   struct Entry {
