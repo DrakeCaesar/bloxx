@@ -15,6 +15,19 @@
 #endif
 
 #include "config.h"
+
+#ifdef _WIN32
+// If system memory use is above 80%, trim our working set so the OS pages us
+// out and avoids pushing the system into a crash.
+static void trimWorkingSetIfHighMemory() {
+  MEMORYSTATUSEX mem = {};
+  mem.dwLength = sizeof(mem);
+  if (!GlobalMemoryStatusEx(&mem))
+    return;
+  if (mem.dwMemoryLoad > 80)
+    SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+}
+#endif
 #include "display.h"
 #include "grid_config.h"
 #include "search.h"
@@ -805,11 +818,20 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     for (auto &t : revThreads)
       t.join();
 
-    for (int c = 0; c < numThreads; c++) {
-      for (const auto &r : results[c]) {
-        if (parentReverse.emplace(r.next).second) {
-          totalReverseVisited++;
-          qReverse.push_back({storageToState<S>(r.next), r.nextTowers});
+    {
+      size_t inserted = 0;
+      constexpr size_t trimCheckInterval = 50000;
+      for (int c = 0; c < numThreads; c++) {
+        for (const auto &r : results[c]) {
+          if (parentReverse.emplace(r.next).second) {
+            totalReverseVisited++;
+            qReverse.push_back({storageToState<S>(r.next), r.nextTowers});
+            if (++inserted % trimCheckInterval == 0) {
+#ifdef _WIN32
+              trimWorkingSetIfHighMemory();
+#endif
+            }
+          }
         }
       }
     }
@@ -835,7 +857,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
            << parentReverse.size() << "." << endl;
     }
 #ifdef _WIN32
-    SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+    trimWorkingSetIfHighMemory();
 #endif
     depth++;
   }
