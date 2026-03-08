@@ -638,8 +638,8 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
                           bool keepLowest) {
   using S = typename ParentSet::value_type;
   static constexpr size_t kPruneThreshold = 10000;
-  static constexpr int kPruneLowDelta = 3;
-  static constexpr int kPruneHighDelta = 3;
+  static constexpr int kPruneLowDelta = 4;
+  static constexpr int kPruneHighDelta = 4;
   if (parentMap.size() <= kPruneThreshold || queue.empty())
     return;
 
@@ -806,17 +806,23 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     for (int c = 0; c < numThreads; c++)
       results[c].reserve(layer.size() * 2);
 
-    vector<thread> revThreads;
-    for (int c = 0; c < numThreads; c++) {
-      const QueueEntry *chunkStart = layer.data() + (size_t)c * chunkSize;
-      const QueueEntry *chunkEnd =
-          layer.data() + min((size_t)(c + 1) * chunkSize, layer.size());
-      if (chunkStart < chunkEnd)
-        revThreads.emplace_back(reverseExpandChunkImpl<S>, chunkStart, chunkEnd,
-                                &results[c], pathStartState, reverseBaseType);
+    if (numThreads == 1) {
+      reverseExpandChunkImpl<S>(layer.data(), layer.data() + layer.size(),
+                                &results[0], pathStartState, reverseBaseType);
+    } else {
+      vector<thread> revThreads;
+      for (int c = 0; c < numThreads; c++) {
+        const QueueEntry *chunkStart = layer.data() + (size_t)c * chunkSize;
+        const QueueEntry *chunkEnd =
+            layer.data() + min((size_t)(c + 1) * chunkSize, layer.size());
+        if (chunkStart < chunkEnd)
+          revThreads.emplace_back(reverseExpandChunkImpl<S>, chunkStart,
+                                  chunkEnd, &results[c], pathStartState,
+                                  reverseBaseType);
+      }
+      for (auto &t : revThreads)
+        t.join();
     }
-    for (auto &t : revThreads)
-      t.join();
 
     {
       size_t inserted = 0;
