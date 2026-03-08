@@ -19,6 +19,7 @@
 #include "grid_config.h"
 #include "search.h"
 #include "search_bfs.h"
+#include "search_dfs.h"
 #include "search_impl.h"
 #include "state_utils.h"
 #include "transition.h"
@@ -359,12 +360,12 @@ printBuildPath(StateType bestState,
     printExpandedPath(expandPathForEmptyBoard(steps), g_baseState);
 }
 
-struct SearchResult {
-  StateType bestState;
-  int bestScore;
-  long long explored;
-  size_t uniqueStates;
-};
+void printBuildPathSteps(const vector<pair<int, int>> &buildPath) {
+  if (PATH_FROM_EMPTY)
+    printExpandedPath(buildPath, StateType(0));
+  else
+    printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState);
+}
 
 // BFS from base state (all blue) stopping as soon as target is reached.
 // Returns a set of encoded states (transition packed into top byte) for path
@@ -770,80 +771,6 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
   }
 }
 
-// ── DFS mode: depth-limited DFS with visited set and in-memory path ─────────
-// Path from start to current depth kept in path[] so parent = path[depth-1],
-// no hash lookup. Visited set used for branch elimination (don't re-explore).
-static void dfsVisit(
-    StateType cur, int curScore, int depth,
-    vector<pair<StateType, Transition>> &path,
-    robin_hood::unordered_set<StateType, StateHash, StateEqual> &visited,
-    SearchResult &result) {
-  result.explored++;
-  if (curScore > result.bestScore) {
-    result.bestScore = curScore;
-    result.bestState = cur;
-    cout << "New best score: " << result.bestScore << "\n";
-    printGrid(cur);
-  }
-  if (depth >= DFS_MAX_DEPTH)
-    return;
-  for (int pos = 0; pos < g_numPos; pos++) {
-    int curType = stateGet(cur, pos);
-    uint32_t present = neighborPresent(cur, pos);
-    for (int newType = 0; newType <= g_maxType[pos]; newType++) {
-      if (!FORWARD_TRANSITIONS[curType][newType])
-        continue;
-      if (!canPlace(present, newType))
-        continue;
-      auto [next, childPos] =
-          canonicalAndChildPos(stateSet(cur, pos, newType), pos);
-      if (visited.count(next))
-        continue;
-      visited.insert(next);
-      path.push_back({next, Transition{(int8_t)childPos, (int8_t)curType}});
-      dfsVisit(next, curScore + (newType - curType), depth + 1, path, visited,
-               result);
-      path.pop_back();
-    }
-  }
-}
-
-static void runDFSSearch(SearchResult &result) {
-  robin_hood::unordered_set<StateType, StateHash, StateEqual> visited;
-  visited.reserve(1ull << 22);
-  vector<pair<StateType, Transition>> path;
-
-  StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
-  visited.insert(startState);
-  path.push_back({startState, {}});
-
-  result.bestState = startState;
-  result.bestScore = 0;
-  result.explored = 0;
-
-  dfsVisit(startState, 0, 0, path, visited, result);
-  result.uniqueStates = visited.size();
-
-  if (g_baselineFile && g_baselineFile->is_open()) {
-    g_originalCoutBuf = cout.rdbuf();
-    cout.rdbuf(g_baselineFile->rdbuf());
-  }
-  vector<pair<int, int>> buildPath =
-      buildPathFromReverseBfs(canonical(result.bestState));
-  if (buildPath.empty()) {
-    cout << "\nBuild path not found by reverse BFS.\n";
-  } else {
-    if (PATH_FROM_EMPTY)
-      printExpandedPath(buildPath, StateType(0));
-    else
-      printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState);
-  }
-  if (g_originalCoutBuf) {
-    cout.rdbuf(g_originalCoutBuf);
-    g_originalCoutBuf = nullptr;
-  }
-}
-
 // ── Public entrypoint for a single level/unlocked-type configuration ────────
 
 void runSingleLevel() {
@@ -878,9 +805,9 @@ void runSingleLevel() {
       runBFSSearch<StateType>(result);
   }
 
-  cout << (SEARCH_MODE == 1 ? "\nSliding window complete.\n"
+  cout << (SEARCH_MODE == 1   ? "\nSliding window complete.\n"
            : SEARCH_MODE == 2 ? "\nDFS complete.\n"
-                             : "\nBFS complete.\n");
+                              : "\nBFS complete.\n");
   cout << "States explored : " << result.explored << "\n";
   cout << "Unique states   : " << result.uniqueStates << "\n";
   cout << "Best score      : " << result.bestScore << "\n\n";

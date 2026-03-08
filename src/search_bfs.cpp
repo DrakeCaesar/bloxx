@@ -494,19 +494,23 @@ buildPathFromReverseBfsImpl(StateType finalState) {
     tForward.join();
   }
 
+  std::cout << "\nReverse BFS visited " << totalReverseVisited
+            << " states (map size after pruning: " << parentReverse.size()
+            << ").\n";
+
   if (g_baselineFile && g_baselineFile->is_open()) {
     g_originalCoutBuf = std::cout.rdbuf();
     std::cout.rdbuf(g_baselineFile->rdbuf());
   }
 
-  std::cout << "\nReverse BFS visited " << totalReverseVisited
-            << " states (map size after pruning: " << parentReverse.size()
-            << ").\n";
-
   std::vector<std::pair<int, int>> steps;
 
   if (!RUN_PARALLEL_FORWARD_BFS) {
     if (parentReverse.count(toStorageKey<S>(pathStartState)) == 0) {
+      if (g_originalCoutBuf) {
+        std::cout.rdbuf(g_originalCoutBuf);
+        g_originalCoutBuf = nullptr;
+      }
       std::lock_guard<std::mutex> lock(coutMutex);
       std::cout << "[Main] Reverse BFS did not reach path start. Cannot build "
                    "path."
@@ -562,6 +566,10 @@ buildPathFromReverseBfsImpl(StateType finalState) {
   }
 
   if (interceptCount == 0) {
+    if (g_originalCoutBuf) {
+      std::cout.rdbuf(g_originalCoutBuf);
+      g_originalCoutBuf = nullptr;
+    }
     std::lock_guard<std::mutex> lock(coutMutex);
     std::cout << "[Main] No intercept: no state reached by both searches. "
                  "Cannot reconstruct path."
