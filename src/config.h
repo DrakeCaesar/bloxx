@@ -109,15 +109,18 @@ using StateType128 = uint128_simd;
 // ════════════════════════════════════════════════════════════════════════════
 
 #define LEVEL 2 // Grid level (1-5), must be #define for preprocessor
-// 0 = BFS, 1 = Sliding Window
+// 0 = BFS, 1 = Sliding Window, 2 = DFS (depth-limited, visited set + path
+// stack)
 [[maybe_unused]] const int SEARCH_MODE = 1;
+// DFS mode only: max depth for depth-limited DFS
+const int DFS_MAX_DEPTH = 20;
 // Maximum tower type unlocked (1=Blue, 2=Red, 3=Green, 4=Yellow, 5=White)
 // Set to 5 for all towers unlocked, 3 for only Blue/Red/Green, etc.
 const int MAX_UNLOCKED_TYPE = 5;
 
 // Baseline generation: generate baselines for unlocked types in this range
 const int UNLOCKED_TYPE_START = 2; // First type to generate baseline for
-const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
+const int UNLOCKED_TYPE_END = 2;   // Last type to generate baseline for
 
 // Multi-level configuration
 const int LEVEL_START = 4; // First level to process
