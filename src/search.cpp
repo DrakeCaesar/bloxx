@@ -9,6 +9,10 @@
 #include <robin_hood.h>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 #include "config.h"
 #include "display.h"
@@ -830,6 +834,9 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
            << " ms). Queue size now " << qReverse.size() << ", map size "
            << parentReverse.size() << "." << endl;
     }
+#ifdef _WIN32
+    SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+#endif
     depth++;
   }
   {
@@ -991,6 +998,12 @@ static vector<pair<int, int>>
 buildPathFromReverseBfsImpl(StateType finalState) {
   const StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
   const int reverseBaseType = PATH_FROM_EMPTY ? 0 : 1;
+
+#ifdef _WIN32
+  // Hint that our working set can be trimmed so the OS pages us out earlier
+  // instead of keeping RAM at 99% and only paging under crisis.
+  SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+#endif
 
   ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
       parentReverse;
