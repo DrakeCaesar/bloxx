@@ -52,28 +52,48 @@ BEGIN {
 }
 
 END {
-    # Header row
+    # Forward format: from\to (same as config.h FORWARD_TRANSITIONS)
+    print "Forward (from -> to)"
+    print ""
     printf "%-8s", "from\\to"
     for (j = 0; j <= 5; j++) printf "%8s", names[j+1]
     print ""
-
-    # Separator
     printf "%s\n", "------------------------------------------------------------------------"
-
-    # Data rows
     for (i = 0; i <= 5; i++) {
         printf "%-8s", names[i+1]
         for (j = 0; j <= 5; j++)
             printf "%8s", (cnt[i,j]+0 > 0 ? cnt[i,j] : ".")
         print ""
     }
-
-    # Totals row
     printf "%s\n", "------------------------------------------------------------------------"
     printf "%-8s", "TOTAL"
     for (j = 0; j <= 5; j++) {
         col = 0
         for (i = 0; i <= 5; i++) col += cnt[i,j]+0
+        printf "%8s", (col > 0 ? col : ".")
+    }
+    print ""
+
+    # Backward format: same 6x6 layout as config.h BACKWARD_TRANSITIONS
+    # Backward from i to j = forward from j to i, so cell [i][j] = cnt[j][i]
+    print ""
+    print "Backward (from -> to)"
+    print ""
+    printf "%-8s", "from\\to"
+    for (j = 0; j <= 5; j++) printf "%8s", names[j+1]
+    print ""
+    printf "%s\n", "------------------------------------------------------------------------"
+    for (i = 0; i <= 5; i++) {
+        printf "%-8s", names[i+1]
+        for (j = 0; j <= 5; j++)
+            printf "%8s", (cnt[j,i]+0 > 0 ? cnt[j,i] : ".")
+        print ""
+    }
+    printf "%s\n", "------------------------------------------------------------------------"
+    printf "%-8s", "TOTAL"
+    for (j = 0; j <= 5; j++) {
+        col = 0
+        for (i = 0; i <= 5; i++) col += cnt[j,i]+0
         printf "%8s", (col > 0 ? col : ".")
     }
     print ""
