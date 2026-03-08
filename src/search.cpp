@@ -65,8 +65,7 @@ struct StateHash {
 struct StateEqual {
   bool operator()(const StateType &a, const StateType &b) const noexcept {
     return a.u.lo == b.u.lo &&
-           (a.u.hi & 0x00FFFFFFFFFFFFFFull) ==
-               (b.u.hi & 0x00FFFFFFFFFFFFFFull);
+           (a.u.hi & 0x00FFFFFFFFFFFFFFull) == (b.u.hi & 0x00FFFFFFFFFFFFFFull);
   }
 };
 
@@ -80,10 +79,11 @@ template <> struct hash<uint128_simd> {
 };
 } // namespace robin_hood
 
-// ── Dynamic storage type ──────────────────────────────────────────────────────
-// Levels 1+2 (numPos ≤ 16): state ≤ 48 bits; packed fits in top byte of
-// uint64_t (bits 56-63). Storing 8 bytes instead of 16 halves memory again.
-// Levels 3-5 (numPos > 16): keep current StateType storage (bits 120-127).
+// ── Dynamic storage type
+// ────────────────────────────────────────────────────── Levels 1+2 (numPos ≤
+// 16): state ≤ 48 bits; packed fits in top byte of uint64_t (bits 56-63).
+// Storing 8 bytes instead of 16 halves memory again. Levels 3-5 (numPos > 16):
+// keep current StateType storage (bits 120-127).
 //
 // All BFS state operations (stateGet, canonical, …) always use StateType.
 // Only the visited/parent SET keys are stored as the narrower uint64_t.
@@ -94,7 +94,9 @@ inline bool usesStorage64();
 
 // Pure StateType → storage key (strips any packed bits, narrows if needed).
 template <typename S> inline S toStorageKey(StateType s);
-template <> inline uint64_t toStorageKey<uint64_t>(StateType s) { return s.u.lo; }
+template <> inline uint64_t toStorageKey<uint64_t>(StateType s) {
+  return s.u.lo;
+}
 template <> inline StateType toStorageKey<StateType>(StateType s) { return s; }
 
 // Encode pure state + transition into a storage element.
@@ -388,7 +390,8 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
   return out;
 }
 
-static void advanceStateForDisplay(StateType &canonState, StateType &displayState,
+static void advanceStateForDisplay(StateType &canonState,
+                                   StateType &displayState,
                                    uint64_t &placedMask, int pos, int newType) {
   int usedSymm = 0;
   for (int k = 0; k < g_numSymm; k++) {
@@ -519,11 +522,12 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
 }
 
 template <typename S>
-inline void printBuildPath(
-    StateType bestState,
-    const robin_hood::unordered_set<S, StorageHash<S>, StorageEqual<S>>
-        &visited) {
-  vector<pair<int, int>> steps; // (pos, newType) — pos in state *before* the move
+inline void
+printBuildPath(StateType bestState,
+               const robin_hood::unordered_set<S, StorageHash<S>,
+                                               StorageEqual<S>> &visited) {
+  vector<pair<int, int>>
+      steps; // (pos, newType) — pos in state *before* the move
   StateType cur = bestState;
   while (true) {
     auto tr = storageTrans<S>(*visited.find(toStorageKey<S>(cur)));
@@ -533,7 +537,8 @@ inline void printBuildPath(
     int newType = stateGet(cur, childPos);
     StateType parent = canonical(stateSet(cur, childPos, tr.getType()));
     // Replay expects (pos, newType) where pos is in the state before the move.
-    // childPos is in cur (child); find pos in parent s.t. stateSet(parent, pos, newType) -> cur.
+    // childPos is in cur (child); find pos in parent s.t. stateSet(parent, pos,
+    // newType) -> cur.
     int posInParent = -1;
     for (int p = 0; p < g_numPos; p++) {
       if (stateGet(parent, p) == newType)
@@ -565,8 +570,7 @@ struct SearchResult {
 // BFS from base state (all blue) stopping as soon as target is reached.
 // Returns a set of encoded states (transition packed into top byte) for path
 // reconstruction.
-inline robin_hood::unordered_set<StateType>
-bfsShortestPath(StateType target) {
+inline robin_hood::unordered_set<StateType> bfsShortestPath(StateType target) {
   robin_hood::unordered_set<StateType> path;
   path.reserve(1ull << 24); // ~16M elements
   struct Entry {
@@ -594,8 +598,8 @@ bfsShortestPath(StateType target) {
           continue;
         auto [next, childPos] =
             canonicalAndChildPos(stateSet(cur, pos, newType), pos);
-        if (path.emplace(encodeTransition(
-                             next, Transition{(int8_t)childPos, (int8_t)curType}))
+        if (path.emplace(encodeTransition(next, Transition{(int8_t)childPos,
+                                                           (int8_t)curType}))
                 .second)
           q.push_back({next, curScore + (newType - curType)});
       }
@@ -607,8 +611,7 @@ bfsShortestPath(StateType target) {
 // Reverse BFS shared types and helpers (named functions for profiling).
 using QueueEntry = std::pair<StateType, int>;
 
-template <typename S>
-struct ReverseExpansion {
+template <typename S> struct ReverseExpansion {
   S next;
   int nextTowers;
 };
@@ -631,8 +634,8 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
     maxTowers = max(maxTowers, tc);
   }
 
-  int cutoff = keepLowest ? (minTowers + kPruneLowDelta)
-                          : (maxTowers - kPruneHighDelta);
+  int cutoff =
+      keepLowest ? (minTowers + kPruneLowDelta) : (maxTowers - kPruneHighDelta);
   vector<QueueEntry> toProcess;
   toProcess.reserve(queue.size());
   for (const auto &entry : queue) {
@@ -685,10 +688,10 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
 }
 
 template <typename S>
-static void reverseExpandChunkImpl(
-    const QueueEntry *start, const QueueEntry *end,
-    vector<ReverseExpansion<S>> *out, StateType pathStartState,
-    int reverseBaseType) {
+static void
+reverseExpandChunkImpl(const QueueEntry *start, const QueueEntry *end,
+                       vector<ReverseExpansion<S>> *out,
+                       StateType pathStartState, int reverseBaseType) {
   const auto &backTable =
       PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
   for (; start != end; ++start) {
@@ -708,19 +711,18 @@ static void reverseExpandChunkImpl(
             canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
         int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
                          (prevType != reverseBaseType ? 1 : 0);
-        out->push_back(
-            {encodeForStorage<S>(next,
-                                 Transition{(int8_t)childPos, (int8_t)curType}),
-             nextTowers});
+        out->push_back({encodeForStorage<S>(next, Transition{(int8_t)childPos,
+                                                             (int8_t)curType}),
+                        nextTowers});
       }
     }
   }
 }
 
-template <typename S>
-struct ReverseTaskContext {
+template <typename S> struct ReverseTaskContext {
   std::deque<QueueEntry> *qReverse;
-  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> *parentReverse;
+  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+      *parentReverse;
   StateType pathStartState;
   std::mutex *coutMutex;
   std::atomic<bool> *reverseFinished;
@@ -728,8 +730,7 @@ struct ReverseTaskContext {
   int reverseBaseType;
 };
 
-template <typename S>
-static void runReverseTask(ReverseTaskContext<S> *ctx) {
+template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
   std::deque<QueueEntry> &qReverse = *ctx->qReverse;
   auto &parentReverse = *ctx->parentReverse;
   StateType pathStartState = ctx->pathStartState;
@@ -776,8 +777,7 @@ static void runReverseTask(ReverseTaskContext<S> *ctx) {
               .count();
       lock_guard<mutex> lock(coutMutex);
       cout << "[Reverse] Layer " << depth << " done in " << expandMs
-           << " ms (expand " << expandMs << " ms). Reached base state."
-           << endl;
+           << " ms (expand " << expandMs << " ms). Reached base state." << endl;
       break;
     }
 
@@ -796,7 +796,7 @@ static void runReverseTask(ReverseTaskContext<S> *ctx) {
           layer.data() + min((size_t)(c + 1) * chunkSize, layer.size());
       if (chunkStart < chunkEnd)
         revThreads.emplace_back(reverseExpandChunkImpl<S>, chunkStart, chunkEnd,
-                               &results[c], pathStartState, reverseBaseType);
+                                &results[c], pathStartState, reverseBaseType);
     }
     for (auto &t : revThreads)
       t.join();
@@ -839,18 +839,17 @@ static void runReverseTask(ReverseTaskContext<S> *ctx) {
   reverseFinished = true;
 }
 
-template <typename S>
-struct ForwardTaskContext {
+template <typename S> struct ForwardTaskContext {
   std::deque<QueueEntry> *qForward;
-  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> *parentForward;
+  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+      *parentForward;
   StateType pathStartState;
   int reverseBaseType;
   std::atomic<bool> *reverseFinished;
   std::mutex *coutMutex;
 };
 
-template <typename S>
-static void runForwardTask(ForwardTaskContext<S> *ctx) {
+template <typename S> static void runForwardTask(ForwardTaskContext<S> *ctx) {
   std::deque<QueueEntry> &qForward = *ctx->qForward;
   auto &parentForward = *ctx->parentForward;
   int reverseBaseType = ctx->reverseBaseType;
@@ -907,8 +906,7 @@ static void runForwardTask(ForwardTaskContext<S> *ctx) {
                   .emplace(encodeForStorage<S>(
                       next, Transition{(int8_t)childPos, (int8_t)curType}))
                   .second) {
-            int nextTowers = curTowers -
-                             (curType != reverseBaseType ? 1 : 0) +
+            int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
                              (newType != reverseBaseType ? 1 : 0);
             qForward.push_back({storageToState<S>(next), nextTowers});
           }
@@ -989,13 +987,16 @@ static int reverseDepthOfImpl(
 // reconstruction since the search itself doesn't store transitions.
 // S = uint64_t for levels 1+2 (state ≤ 48 bits), StateType for 3-5.
 template <typename S>
-static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) {
+static vector<pair<int, int>>
+buildPathFromReverseBfsImpl(StateType finalState) {
   const StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
   const int reverseBaseType = PATH_FROM_EMPTY ? 0 : 1;
 
-  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> parentReverse;
+  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+      parentReverse;
   parentReverse.reserve(1ull << 26); // ~64M elements
-  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> parentForward;
+  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+      parentForward;
   if (RUN_PARALLEL_FORWARD_BFS)
     parentForward.reserve(1ull << 26); // ~64M elements
 
@@ -1023,16 +1024,17 @@ static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) 
       cout << "[Main] Reverse BFS only (parallel forward disabled)." << endl;
   }
 
-  ReverseTaskContext<S> revCtx{&qReverse,     &parentReverse,
-                              pathStartState, &coutMutex,
-                              &reverseFinished, &totalReverseVisited,
-                              reverseBaseType};
+  ReverseTaskContext<S> revCtx{
+      &qReverse,        &parentReverse,       pathStartState, &coutMutex,
+      &reverseFinished, &totalReverseVisited, reverseBaseType};
   thread tReverse(runReverseTask<S>, &revCtx);
   thread tForward;
+  std::optional<ForwardTaskContext<S>> fwdCtx;
   if (RUN_PARALLEL_FORWARD_BFS) {
-    ForwardTaskContext<S> fwdCtx{&qForward, &parentForward, pathStartState,
-                                 reverseBaseType, &reverseFinished, &coutMutex};
-    tForward = thread(runForwardTask<S>, &fwdCtx);
+    fwdCtx =
+        ForwardTaskContext<S>{&qForward,       &parentForward,   pathStartState,
+                              reverseBaseType, &reverseFinished, &coutMutex};
+    tForward = thread(runForwardTask<S>, &*fwdCtx);
   }
   tReverse.join();
   if (RUN_PARALLEL_FORWARD_BFS) {
@@ -1058,7 +1060,8 @@ static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) 
   vector<pair<int, int>> steps;
 
   if (!RUN_PARALLEL_FORWARD_BFS) {
-    // Walk from pathStartState toward finalState following the reverse BFS tree.
+    // Walk from pathStartState toward finalState following the reverse BFS
+    // tree.
     if (parentReverse.count(toStorageKey<S>(pathStartState)) == 0) {
       lock_guard<mutex> lock(coutMutex);
       cout << "[Main] Reverse BFS did not reach path start. Cannot build path."
@@ -1111,8 +1114,7 @@ static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) 
          << forwardDepthOfImpl<S>(parentForward, meetState)
          << ", reverse depth "
          << reverseDepthOfImpl<S>(parentReverse, meetState) << ", total "
-         << bestTotal << " steps."
-         << endl;
+         << bestTotal << " steps." << endl;
   }
 
   if (interceptCount == 0) {
@@ -1479,8 +1481,7 @@ static SearchResult runSlidingWindow() {
 // BFS over all reachable states.  S = uint64_t for levels 1+2, StateType for
 // levels 3+.  Populates result and writes path reconstruction to cout (which
 // may be redirected to the baseline file by the caller).
-template <typename S>
-static void runBFSSearch(SearchResult &result) {
+template <typename S> static void runBFSSearch(SearchResult &result) {
   robin_hood::unordered_set<S, StorageHash<S>, StorageEqual<S>> visited;
   visited.reserve(1ull << 24);
 
@@ -1572,7 +1573,8 @@ void runSingleLevel() {
   if (SEARCH_MODE == 1) {
     result = runSlidingWindow();
   } else {
-    // Dispatch to the appropriately-typed BFS (uint64_t for levels 1+2, StateType for 3+).
+    // Dispatch to the appropriately-typed BFS (uint64_t for levels 1+2,
+    // StateType for 3+).
     if (usesStorage64())
       runBFSSearch<uint64_t>(result);
     else
