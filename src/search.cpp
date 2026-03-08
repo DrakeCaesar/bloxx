@@ -638,8 +638,8 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
                           bool keepLowest) {
   using S = typename ParentSet::value_type;
   static constexpr size_t kPruneThreshold = 10000;
-  static constexpr int kPruneLowDelta = 4;
-  static constexpr int kPruneHighDelta = 4;
+  static constexpr int kPruneLowDelta = 3;
+  static constexpr int kPruneHighDelta = 3;
   if (parentMap.size() <= kPruneThreshold || queue.empty())
     return;
 
