@@ -110,18 +110,18 @@ using StateType128 = uint128_simd;
 
 #define LEVEL 2 // Grid level (1-5), must be #define for preprocessor
 // 0 = BFS, 1 = Sliding Window
-[[maybe_unused]] const int SEARCH_MODE = 1;
+[[maybe_unused]] const int SEARCH_MODE = 0;
 // Maximum tower type unlocked (1=Blue, 2=Red, 3=Green, 4=Yellow, 5=White)
 // Set to 5 for all towers unlocked, 3 for only Blue/Red/Green, etc.
 const int MAX_UNLOCKED_TYPE = 5;
 
 // Baseline generation: generate baselines for unlocked types in this range
-const int UNLOCKED_TYPE_START = 2; // First type to generate baseline for
+const int UNLOCKED_TYPE_START = 5; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
 const int LEVEL_START = 1; // First level to process
-const int LEVEL_END = 4;   // Last level to process (inclusive)
+const int LEVEL_END = 1;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {
@@ -140,12 +140,12 @@ const bool RUN_PARALLEL_FORWARD_BFS = false;
 
 // When true, path-finding bidirectional BFS starts from empty (all 0) instead
 // of all-blue (all 1). Can find more optimal paths (e.g. fewer placements).
-const bool PATH_FROM_EMPTY = false;
+const bool PATH_FROM_EMPTY = true;
 
 // ── Transition tables ────────────────────────────────────────────────────────
-// TRANSITIONS[fromType][toType] = 1 if (fromType → toType) is allowed, 0
-// otherwise. Edit these to prune transitions that are never optimal. The
-// canPlace() neighbor check is still applied on top of these.
+// TRANSITIONS[fromType][toType] = true if (fromType → toType) is allowed.
+// Edit these to prune transitions that are never optimal.
+// The canPlace() neighbor check is still applied on top of these.
 //                empty  blue   red    green  yellow white
 // Normal forward BFS (and bidirectional forward): no downgrading from white.
 constexpr bool FORWARD_TRANSITIONS[6][6] = {

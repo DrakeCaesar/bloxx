@@ -20,6 +20,12 @@ function findType(s,    p, c) {
 
 BEGIN {
     split("Empty,Blue,Red,Green,Yellow,White", names, ",")
+    split("empty,blue,red,green,yellow,white", configNames, ",")
+    for (i = 1; i <= 6; i++) {
+        n = configNames[i]
+        while (length(n) < 7) n = n " "
+        configNames[i] = n
+    }
 }
 
 {
@@ -97,5 +103,27 @@ END {
         printf "%8s", (col > 0 ? col : ".")
     }
     print ""
+
+    # Boolean matrices for pasting into config.h (lowercase, no space after {)
+    print ""
+    print "--- Paste into config.h: FORWARD_TRANSITIONS ---"
+    print ""
+    for (i = 0; i <= 5; i++) {
+        row = "    /* " configNames[i+1] "*/ {"
+        for (j = 0; j <= 5; j++) {
+            row = row (j > 0 ? ", " : "") ((cnt[i,j]+0) > 0 ? 1 : 0)
+        }
+        print row "},"
+    }
+    print ""
+    print "--- Paste into config.h: BACKWARD_TRANSITIONS ---"
+    print ""
+    for (i = 0; i <= 5; i++) {
+        row = "    /* " configNames[i+1] "*/ {"
+        for (j = 0; j <= 5; j++) {
+            row = row (j > 0 ? ", " : "") ((cnt[j,i]+0) > 0 ? 1 : 0)
+        }
+        print row "},"
+    }
 }
 ' level*_type*_baseline.txt
