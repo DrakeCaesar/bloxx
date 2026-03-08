@@ -523,7 +523,7 @@ inline void printBuildPath(
     StateType bestState,
     const robin_hood::unordered_set<S, StorageHash<S>, StorageEqual<S>>
         &visited) {
-  vector<pair<int, int>> steps; // (pos, newType)
+  vector<pair<int, int>> steps; // (pos, newType) — pos in state *before* the move
   StateType cur = bestState;
   while (true) {
     auto tr = storageTrans<S>(*visited.find(toStorageKey<S>(cur)));
@@ -531,8 +531,22 @@ inline void printBuildPath(
       break;
     int childPos = tr.getPos();
     int newType = stateGet(cur, childPos);
-    steps.push_back({childPos, newType});
-    cur = canonical(stateSet(cur, childPos, tr.getType()));
+    StateType parent = canonical(stateSet(cur, childPos, tr.getType()));
+    // Replay expects (pos, newType) where pos is in the state before the move.
+    // childPos is in cur (child); find pos in parent s.t. stateSet(parent, pos, newType) -> cur.
+    int posInParent = -1;
+    for (int p = 0; p < g_numPos; p++) {
+      if (stateGet(parent, p) == newType)
+        continue;
+      if (canonical(stateSet(parent, p, newType)) == cur) {
+        posInParent = p;
+        break;
+      }
+    }
+    if (posInParent < 0)
+      posInParent = childPos; // fallback if no symmetry (g_numSymm == 1)
+    steps.push_back({posInParent, newType});
+    cur = parent;
   }
   reverse(steps.begin(), steps.end());
   if (PATH_FROM_EMPTY)
@@ -1118,8 +1132,20 @@ static vector<pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) 
         break;
       int childPos = tr.getPos();
       int newType = stateGet(cur, childPos);
-      stepsForward.push_back({childPos, newType});
-      cur = canonical(stateSet(cur, childPos, tr.getType()));
+      StateType parent = canonical(stateSet(cur, childPos, tr.getType()));
+      int posInParent = -1;
+      for (int p = 0; p < g_numPos; p++) {
+        if (stateGet(parent, p) == newType)
+          continue;
+        if (canonical(stateSet(parent, p, newType)) == cur) {
+          posInParent = p;
+          break;
+        }
+      }
+      if (posInParent < 0)
+        posInParent = childPos;
+      stepsForward.push_back({posInParent, newType});
+      cur = parent;
     }
   }
   reverse(stepsForward.begin(), stepsForward.end());
