@@ -1,9 +1,6 @@
 #pragma once
 
-#include <algorithm>
 #include <cstdint>
-#include <iostream>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -111,7 +108,7 @@ using StateType128 = uint128_simd;
 #define LEVEL 2 // Grid level (1-5), must be #define for preprocessor
 // 0 = BFS, 1 = Sliding Window, 2 = DFS (depth-limited, visited set + path
 // stack)
-[[maybe_unused]] const int SEARCH_MODE = 2;
+[[maybe_unused]] const int SEARCH_MODE = 0;
 // DFS mode only: max depth for depth-limited DFS
 const int DFS_MAX_DEPTH = 17;
 // Maximum tower type unlocked (1=Blue, 2=Red, 3=Green, 4=Yellow, 5=White)
@@ -123,8 +120,8 @@ const int UNLOCKED_TYPE_START = 2; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 1; // First level to process
-const int LEVEL_END = 1;   // Last level to process (inclusive)
+const int LEVEL_START = 3; // First level to process
+const int LEVEL_END = 3;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {

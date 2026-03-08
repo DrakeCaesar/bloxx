@@ -1,13 +1,8 @@
 #include <ankerl/unordered_dense.h>
-#include <atomic>
 #include <chrono>
-#include <climits>
-#include <deque>
 #include <functional>
 #include <iostream>
-#include <mutex>
 #include <robin_hood.h>
-#include <thread>
 #include <vector>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN

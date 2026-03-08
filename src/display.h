@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iostream>
+
 #include "config.h"
 #include "grid_config.h"
 #include "state_utils.h"

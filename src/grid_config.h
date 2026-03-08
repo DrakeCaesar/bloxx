@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include "config.h"
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -146,4 +148,3 @@ inline void reinitializeGrid(int level) {
 }
 
 #define GRID getGrid()
-
