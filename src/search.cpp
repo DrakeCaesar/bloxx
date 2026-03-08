@@ -762,8 +762,8 @@ void runSingleLevel() {
   cout << "Tower Blox Deluxe Solver\n";
   cout << "========================\n";
   cout << "Level: " << getCurrentLevel() << "\n";
-  cout << "Tower types unlocked (1-" << MAX_UNLOCKED_TYPE << "):\n";
-  for (int i = 1; i <= MAX_UNLOCKED_TYPE; i++)
+  cout << "Tower types unlocked (1-" << UNLOCKED_TYPE_END << "):\n";
+  for (int i = 1; i <= UNLOCKED_TYPE_END; i++)
     cout << "  " << COLORS[i] << BLACK_TEXT << i << RESET << " ("
          << COLOR_NAMES[i] << ")\n";
   if (SEARCH_MODE == 0)

@@ -87,7 +87,7 @@ inline GridConfig createGridFromPattern(const vector<string> &pattern) {
     }
   }
 
-  g.build(MAX_UNLOCKED_TYPE);
+  g.build(UNLOCKED_TYPE_END);
   return g;
 }
 
@@ -114,21 +114,6 @@ inline GridConfig createLevel5Grid() {
                                 "...... ", "...... ", "...    "});
 };
 
-inline GridConfig createGrid() {
-  switch (LEVEL) {
-  case 2:
-    return createLevel2Grid();
-  case 3:
-    return createLevel3Grid();
-  case 4:
-    return createLevel4Grid();
-  case 5:
-    return createLevel5Grid();
-  default:
-    return createLevel1Grid();
-  }
-}
-
 inline GridConfig createGrid(int level) {
   switch (level) {
   case 2:
@@ -142,6 +127,10 @@ inline GridConfig createGrid(int level) {
   default:
     return createLevel1Grid();
   }
+}
+
+inline GridConfig createGrid() {
+  return createGrid(LEVEL_START);
 }
 
 inline GridConfig &getGrid() {

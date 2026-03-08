@@ -105,27 +105,23 @@ using StateType128 = uint128_simd;
 // Configuration Constants
 // ════════════════════════════════════════════════════════════════════════════
 
-#define LEVEL 2 // Grid level (1-5), must be #define for preprocessor
 // 0 = BFS, 1 = Sliding Window, 2 = DFS (depth-limited, visited set + path
 // stack)
-[[maybe_unused]] const int SEARCH_MODE = 2;
+[[maybe_unused]] const int SEARCH_MODE = 1;
 // DFS mode only: max depth for depth-limited DFS
 const int DFS_MAX_DEPTH = 17;
-// Maximum tower type unlocked (1=Blue, 2=Red, 3=Green, 4=Yellow, 5=White)
-// Set to 5 for all towers unlocked, 3 for only Blue/Red/Green, etc.
-const int MAX_UNLOCKED_TYPE = 5;
 
 // Baseline generation: generate baselines for unlocked types in this range
 const int UNLOCKED_TYPE_START = 5; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 1; // First level to process
-const int LEVEL_END = 1;   // Last level to process (inclusive)
+const int LEVEL_START = 5; // First level to process
+const int LEVEL_END = 5;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {
-  static int currentLevel = LEVEL;
+  static int currentLevel = LEVEL_START;
   return currentLevel;
 }
 
@@ -216,19 +212,8 @@ inline const vector<string> &getWindowKernelPattern() {
 #define WINDOW_KERNEL_PATTERN getWindowKernelPattern()
 
 // Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
-// 128-bit
-// For multi-level processing, we use 128-bit for all levels to avoid
-// recompilation Comment out the #if when running single level, use the forced
-// line for multi-level
-/*
-#if LEVEL <= 3
-using StateType = StateType64;
-#else
-using StateType = StateType128;
-#endif
-*/
-
-// Force 128-bit for multi-level support
+// 128-bit. For multi-level we use 128-bit for all levels. For single-level
+// you could switch at runtime using getCurrentLevel() <= 3.
 using StateType = StateType128;
 
 // ANSI color codes and display configuration
