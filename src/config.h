@@ -143,47 +143,47 @@ const bool RUN_PARALLEL_FORWARD_BFS = false;
 const bool PATH_FROM_EMPTY = false;
 
 // ── Transition tables ────────────────────────────────────────────────────────
-// TRANSITIONS[fromType][toType] = true if (fromType → toType) is allowed.
-// Edit these to prune transitions that are never optimal.
-// The canPlace() neighbor check is still applied on top of these.
+// TRANSITIONS[fromType][toType] = 1 if (fromType → toType) is allowed, 0
+// otherwise. Edit these to prune transitions that are never optimal. The
+// canPlace() neighbor check is still applied on top of these.
 //                empty  blue   red    green  yellow white
 // Normal forward BFS (and bidirectional forward): no downgrading from white.
 constexpr bool FORWARD_TRANSITIONS[6][6] = {
-    /* empty  */ {false, true, true, true, true, true},
-    /* blue   */ {false, false, true, true, true, true},
-    /* red    */ {false, true, false, true, true, true},
-    /* green  */ {false, true, true, false, true, true},
-    /* yellow */ {false, true, true, true, false, true},
-    /* white  */ {false, false, false, false, false, false},
+    /* empty  */ {0, 1, 1, 1, 1, 1},
+    /* blue   */ {0, 0, 1, 1, 1, 1},
+    /* red    */ {0, 1, 0, 1, 1, 1},
+    /* green  */ {0, 1, 1, 0, 1, 1},
+    /* yellow */ {0, 1, 1, 1, 0, 1},
+    /* white  */ {0, 0, 0, 0, 0, 0},
 };
 
 // Sliding window only: allow white→1,2,3,4 so depth-limited BFS can tear down
 // and rebuild for better local optima.
 constexpr bool FORWARD_TRANSITIONS_SLIDING_WINDOW[6][6] = {
-    /* empty  */ {false, true, true, true, true, true},
-    /* blue   */ {false, false, true, true, true, true},
-    /* red    */ {false, true, false, true, true, true},
-    /* green  */ {false, true, true, false, true, true},
-    /* yellow */ {false, true, true, true, false, true},
-    /* white  */ {false, true, true, true, true, false},
+    /* empty  */ {0, 1, 1, 1, 1, 1},
+    /* blue   */ {0, 0, 1, 1, 1, 1},
+    /* red    */ {0, 1, 0, 1, 1, 1},
+    /* green  */ {0, 1, 1, 0, 1, 1},
+    /* yellow */ {0, 1, 1, 1, 0, 1},
+    /* white  */ {0, 1, 1, 1, 1, 0},
 };
 
 constexpr bool BACKWARD_TRANSITIONS[6][6] = {
-    /* empty  */ {false, false, false, false, false, false},
-    /* blue   */ {false, false, true, true, true, false},
-    /* red    */ {false, true, false, true, true, false},
-    /* green  */ {false, true, true, false, true, false},
-    /* yellow */ {false, true, true, true, false, false},
-    /* white  */ {false, true, true, true, true, false},
+    /* empty  */ {0, 0, 0, 0, 0, 0},
+    /* blue   */ {0, 0, 1, 1, 1, 0},
+    /* red    */ {0, 1, 0, 1, 1, 0},
+    /* green  */ {0, 1, 1, 0, 1, 0},
+    /* yellow */ {0, 1, 1, 1, 0, 0},
+    /* white  */ {0, 1, 1, 1, 1, 0},
 };
 
 constexpr bool BACKWARD_TRANSITIONS_EMPTY[6][6] = {
-    /* empty  */ {false, false, false, false, false, false},
-    /* blue   */ {true, false, true, true, true, false},
-    /* red    */ {true, true, false, true, true, false},
-    /* green  */ {true, true, true, false, true, false},
-    /* yellow */ {true, true, true, true, false, false},
-    /* white  */ {true, true, true, true, true, false},
+    /* empty  */ {0, 0, 0, 0, 0, 0},
+    /* blue   */ {1, 0, 1, 1, 1, 0},
+    /* red    */ {1, 1, 0, 1, 1, 0},
+    /* green  */ {1, 1, 1, 0, 1, 0},
+    /* yellow */ {1, 1, 1, 1, 0, 0},
+    /* white  */ {1, 1, 1, 1, 1, 0},
 };
 
 // Sliding window parameters
