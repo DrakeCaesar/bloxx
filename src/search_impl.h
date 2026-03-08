@@ -7,6 +7,8 @@
 #include "state_utils.h"
 #include "transition.h"
 
+#include <ankerl/unordered_dense.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -36,9 +38,13 @@ inline Transition decodeTransition(StateType encoded) {
 }
 
 // ── Hash / equality (ignore packed top byte) ───────────────────────────────
+// High-quality hash (is_avalanching) so ankerl skips extra mixing; wyhash for
+// good distribution.
 struct StateHash {
+  using is_avalanching = void;
   size_t operator()(const StateType &x) const noexcept {
-    return size_t(x.u.lo ^ (x.u.hi & 0x00FFFFFFFFFFFFFFull));
+    uint64_t parts[2] = {x.u.lo, x.u.hi & 0x00FFFFFFFFFFFFFFULL};
+    return size_t(ankerl::unordered_dense::detail::wyhash::hash(parts, 16));
   }
 };
 struct StateEqual {
@@ -89,8 +95,10 @@ template <> inline Transition storageTrans<StateType>(StateType s) {
 
 template <typename S> struct StorageHash;
 template <> struct StorageHash<uint64_t> {
+  using is_avalanching = void;
   size_t operator()(uint64_t x) const noexcept {
-    return std::hash<uint64_t>{}(x & 0x00FFFFFFFFFFFFFFull);
+    return size_t(
+        ankerl::unordered_dense::detail::wyhash::hash(x & 0x00FFFFFFFFFFFFFFULL));
   }
 };
 template <> struct StorageHash<StateType> : StateHash {};

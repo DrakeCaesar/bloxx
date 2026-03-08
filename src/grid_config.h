@@ -1,15 +1,22 @@
 #pragma once
 
 #include <ankerl/unordered_dense.h>
+#include <type_traits>
 
 #include "config.h"
 
-// Hash for pair<int,int> (ankerl has no std::pair hash by default).
-struct PairIntHash {
-  size_t operator()(const pair<int, int> &p) const noexcept {
-    return (size_t)p.first * 31U + (size_t)(unsigned)p.second;
+// High-quality hash for std::pair<int,int> so ankerl uses it without extra mixing.
+// Hash the whole memory (unique object representation); README §3.2.6.
+namespace ankerl::unordered_dense {
+template <>
+struct hash<std::pair<int, int>> {
+  using is_avalanching = void;
+  [[nodiscard]] size_t operator()(const std::pair<int, int> &p) const noexcept {
+    static_assert(std::has_unique_object_representations_v<std::pair<int, int>>);
+    return size_t(detail::wyhash::hash(&p, sizeof(p)));
   }
 };
+} // namespace ankerl::unordered_dense
 
 // ════════════════════════════════════════════════════════════════════════════
 // Grid Configuration
@@ -19,7 +26,7 @@ struct GridConfig {
   int rows;
   int cols;
   vector<pair<int, int>> positions;    // list of (row, col) coords
-  ankerl::unordered_dense::map<pair<int, int>, int, PairIntHash> coordToIdx; // coord -> position index
+  ankerl::unordered_dense::map<pair<int, int>, int> coordToIdx; // coord -> position index
   vector<vector<int>> neighbors; // neighbors[idx] = list of neighbor indices
   vector<int> maxType;           // maxType[idx] = max tower type achievable
 
