@@ -308,8 +308,8 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
 template <typename S>
 inline void
 printBuildPath(StateType bestState,
-               const ankerl::unordered_dense::set<S, StorageHash<S>,
-                                                 StorageEqual<S>> &visited) {
+const ankerl::unordered_dense::segmented_set<S, StorageHash<S>,
+                                               StorageEqual<S>> &visited) {
   vector<pair<int, int>>
       steps; // (pos, newType) — pos in state *before* the move
   StateType cur = bestState;
@@ -354,10 +354,9 @@ void printBuildPathSteps(const vector<pair<int, int>> &buildPath) {
 // BFS from base state (all blue) stopping as soon as target is reached.
 // Returns a set of encoded states (transition packed into top byte) for path
 // reconstruction.
-inline ankerl::unordered_dense::set<StateType, StateHash, StateEqual>
+inline ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual>
 bfsShortestPath(StateType target) {
-  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> path;
-  path.reserve(1ull << 24); // ~16M elements
+  ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> path;
   struct Entry {
     StateType state;
     int score;
@@ -480,8 +479,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
 
   // Full BFS within window - explore ALL states reachable by modifying window
   // positions
-  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> localVisited;
-  localVisited.reserve(1ull << 24); // ~16M elements per window
+  ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> localVisited;
   struct Entry {
     StateType state;
     int score;
@@ -688,8 +686,7 @@ static SearchResult runSlidingWindow() {
 // levels 3+.  Populates result and writes path reconstruction to cout (which
 // may be redirected to the baseline file by the caller).
 template <typename S> static void runBFSSearch(SearchResult &result) {
-  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>> visited;
-  visited.reserve(1ull << 24);
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> visited;
 
   struct Entry {
     StateType state;

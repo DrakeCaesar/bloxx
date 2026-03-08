@@ -143,7 +143,7 @@ reverseExpandChunkImpl(const QueueEntry *start, const QueueEntry *end,
 
 template <typename S> struct ReverseTaskContext {
   std::deque<QueueEntry> *qReverse;
-  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
       *parentReverse;
   StateType pathStartState;
   std::mutex *coutMutex;
@@ -285,7 +285,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
 
 template <typename S> struct ForwardTaskContext {
   std::deque<QueueEntry> *qForward;
-  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
       *parentForward;
   StateType pathStartState;
   int reverseBaseType;
@@ -396,7 +396,7 @@ template <typename S> static void runForwardTask(ForwardTaskContext<S> *ctx) {
 
 template <typename S>
 static int forwardDepthOfImpl(
-    const ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+    const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
         &parentForward,
     StateType s) {
   int d = 0;
@@ -413,7 +413,7 @@ static int forwardDepthOfImpl(
 
 template <typename S>
 static int reverseDepthOfImpl(
-    const ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+    const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
         &parentReverse,
     StateType s) {
   int d = 0;
@@ -438,13 +438,10 @@ buildPathFromReverseBfsImpl(StateType finalState) {
   SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
 #endif
 
-  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
       parentReverse;
-  parentReverse.reserve(1ull << 26);
-  ankerl::unordered_dense::set<S, StorageHash<S>, StorageEqual<S>>
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
       parentForward;
-  if (RUN_PARALLEL_FORWARD_BFS)
-    parentForward.reserve(1ull << 26);
 
   std::deque<QueueEntry> qReverse;
   std::deque<QueueEntry> qForward;

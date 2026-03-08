@@ -43,7 +43,7 @@ stateSequenceToSteps(const vector<StateType> &path) {
 // score or same score with shorter path) we store the full path.
 static void
 dfsVisit(StateType cur, int curScore, int depth, vector<StateType> &path,
-         ankerl::unordered_dense::map<StateType, int, StateHash, StateEqual>
+         ankerl::unordered_dense::segmented_map<StateType, int, StateHash, StateEqual>
              &minDepth,
          SearchResult &result, vector<StateType> &bestPath,
          int &bestPathLength) {
@@ -85,8 +85,7 @@ dfsVisit(StateType cur, int curScore, int depth, vector<StateType> &path,
 }
 
 void runDFSSearch(SearchResult &result) {
-  ankerl::unordered_dense::map<StateType, int, StateHash, StateEqual> minDepth;
-  minDepth.reserve(1ull << 22);
+  ankerl::unordered_dense::segmented_map<StateType, int, StateHash, StateEqual> minDepth;
   vector<StateType> path;
   vector<StateType> bestPath;
   int bestPathLength = INT_MAX;
