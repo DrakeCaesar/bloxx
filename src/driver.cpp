@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 
@@ -26,8 +27,12 @@ int main() {
   for (int level = LEVEL_START; level <= LEVEL_END; level++) {
     for (int unlockedType = UNLOCKED_TYPE_START;
          unlockedType <= UNLOCKED_TYPE_END; unlockedType++) {
-      // Generate filename with both level and unlocked type
-      string filename = "level" + to_string(level) + "_type" +
+      // If running from build/, write baselines one level up; otherwise current
+      // dir
+      string prefix = "";
+      if (std::filesystem::current_path().filename() == "build")
+        prefix = "../";
+      string filename = prefix + "level" + to_string(level) + "_type" +
                         to_string(unlockedType) + "_baseline.txt";
       ofstream outFile(filename, std::ios::binary);
       if (!outFile) {
