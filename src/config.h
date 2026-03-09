@@ -115,12 +115,12 @@ inline int &getCurrentLevel() {
 }
 
 // Reverse BFS (path reconstruction): number of threads per layer
-const int REVERSE_BFS_NUM_THREADS = 1;
+const int REVERSE_BFS_NUM_THREADS = 4;
 // Throttle for status-line updates (expand/prune/merge progress); milliseconds
 const int REVERSE_BFS_STATUS_UPDATE_MS = 1000;
 
 // Reverse BFS pruning: only run when parent map size exceeds this
-const size_t REVERSE_BFS_PRUNE_THRESHOLD = 10000;
+const size_t REVERSE_BFS_PRUNE_THRESHOLD = 1'000'000;
 // Reverse side: keep states with tower count <= minInQueue + this delta
 const int REVERSE_BFS_PRUNE_LOW_DELTA = 3;
 // Forward side: keep states with tower count >= maxInQueue - this delta
