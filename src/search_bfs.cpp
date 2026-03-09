@@ -44,24 +44,37 @@ template <typename ParentSet>
 static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
                           bool keepLowest, DynamicStatusLine *opLine = nullptr,
                           std::mutex *coutMutex = nullptr,
-                          const std::string &label = "") {
+                          const std::string &label = "",
+                          std::string *lastOp = nullptr,
+                          std::vector<std::string> *opLog = nullptr) {
   using S = typename ParentSet::value_type;
   if (parentMap.size() <= REVERSE_BFS_PRUNE_THRESHOLD || queue.empty())
     return;
 
   auto start = std::chrono::steady_clock::now();
   auto last = start;
-  auto update = [&](const std::string &phase, size_t cur, size_t total) {
+  auto update = [&](const std::string &phase, size_t cur, size_t total,
+                    bool force = false) {
     if (!opLine || !opLine->enabled || !coutMutex)
       return;
-    auto now = std::chrono::steady_clock::now();
-    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last)
-            .count() < 200)
-      return;
+    if (!force) {
+      auto now = std::chrono::steady_clock::now();
+      if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last)
+              .count() < 200)
+        return;
+      last = now;
+    }
     auto ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - start)
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start)
             .count();
     std::lock_guard<std::mutex> lock(*coutMutex);
+    std::string fullOp = label + ": " + phase;
+    if (lastOp && *lastOp != fullOp) {
+      if (opLog && !opLine->lastLine.empty())
+        opLog->push_back(opLine->lastLine);
+      *lastOp = fullOp;
+    }
     if (total > 0) {
       std::string prefix = label + ": " + phase;
       opLine->update(padRight(prefix, REVERSE_BFS_LABEL_WIDTH) +
@@ -71,7 +84,6 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
       opLine->update(label + ": " + phase + " | elapsed " +
                      formatTimeMs((long long)ms));
     }
-    last = now;
   };
 
   int minTowers = g_numPos;
@@ -89,12 +101,13 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
   size_t scanIdx = 0;
   for (const auto &entry : queue) {
     scanIdx++;
-    update("scan", scanIdx, queue.size());
+    update("prune scan", scanIdx, queue.size());
     if ((keepLowest && entry.second <= cutoff) ||
         (!keepLowest && entry.second >= cutoff)) {
       toProcess.push_back(entry);
     }
   }
+  update("prune scan", queue.size(), queue.size(), true);
 
   if (toProcess.empty()) {
     if (keepLowest)
@@ -114,16 +127,17 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
   ParentSet pruned;
   pruned.reserve(toProcess.size() * 4);
   for (size_t i = 0; i < toProcess.size(); i++) {
-    update("seed", i + 1, toProcess.size());
+    update("prune seed", i + 1, toProcess.size());
     pruned.emplace(*parentMap.find(toStorageKey<S>(toProcess[i].first)));
   }
+  update("prune seed", toProcess.size(), toProcess.size(), true);
 
   std::deque<QueueEntry> worklist(toProcess.begin(), toProcess.end());
   size_t processed = 0;
   size_t workTotal = parentMap.size(); // upper bound
   while (!worklist.empty()) {
     processed++;
-    update("closure", processed, workTotal);
+    update("prune closure", processed, workTotal);
     StateType cur = worklist.front().first;
     worklist.pop_front();
     auto it = parentMap.find(toStorageKey<S>(cur));
@@ -139,6 +153,7 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
       worklist.push_back({parent, countTowersLeft(parent)});
     }
   }
+  update("prune closure", processed, (std::max<size_t>)(1, processed), true);
 
   parentMap.swap(pruned);
   queue.assign(toProcess.begin(), toProcess.end());
@@ -253,9 +268,20 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
       TableAlign::Center  // Prog
   };
 
-  // One live status line always shown under the table.
+  // One live status line under the table. On operation switch we record the
+  // current line; after the table we print all recorded lines for debugging.
   DynamicStatusLine opLine(g_originalCoutBuf == nullptr);
   auto reverseStart = std::chrono::steady_clock::now();
+  std::string lastOp;
+  std::vector<std::string> opLog;
+
+  auto recordIfNewOp = [&](const std::string &currentOp) {
+    if (currentOp != lastOp) {
+      if (!lastOp.empty() && !opLine.lastLine.empty())
+        opLog.push_back(opLine.lastLine);
+      lastOp = currentOp;
+    }
+  };
 
   size_t depth = 0;
   double totalExpandMs = 0.0;
@@ -307,13 +333,16 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
 
     {
       std::lock_guard<std::mutex> lock(coutMutex);
+      recordIfNewOp("expanding");
       auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - reverseStart)
                     .count();
-      opLine.update("Reverse BFS: expanding layer " + to_string(depth) +
-                    " | states " + formatNum(layerCount) + " | towers " +
-                    to_string(minTowersLeft) + "-" + to_string(maxTowersLeft) +
-                    " | elapsed " + formatTimeMs((long long)ms));
+      std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
+      std::string label = "Layer " + layerStr;
+      opLine.update(label + ": expanding | states " + formatNum(layerCount) +
+                    " | towers " + to_string(minTowersLeft) + "-" +
+                    to_string(maxTowersLeft) + " | elapsed " +
+                    formatTimeMs((long long)ms));
     }
 
     if (reachedBase) {
@@ -326,7 +355,10 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
       totalExpandMs += expandMs;
       {
         std::lock_guard<std::mutex> lock(coutMutex);
+        if (!opLine.lastLine.empty())
+          opLog.push_back(opLine.lastLine);
         opLine.clear();
+        lastOp.clear();
         printTableRow(
             {to_string(depth),
              formatNum(layerCount),
@@ -345,6 +377,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now() - reverseStart)
                       .count();
+        recordIfNewOp("reached base");
         opLine.update("Reverse BFS: reached base state | elapsed " +
                       formatTimeMs((long long)ms));
       }
@@ -371,8 +404,10 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
                       .count();
         size_t cur = expandedStates.load(std::memory_order_relaxed);
         std::lock_guard<std::mutex> lock(coutMutex);
-        opLine.update(padRight("Reverse BFS: expanding layer " + to_string(depth),
-                               REVERSE_BFS_LABEL_WIDTH) +
+        recordIfNewOp("expanding");
+        std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
+        std::string label = "Layer " + layerStr + ": expanding";
+        opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
                       progressBar(cur, (std::max<size_t>)(1, layer.size())) +
                       " | elapsed " + formatTimeMs((long long)ms));
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -396,11 +431,14 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     monitor.join();
     {
       std::lock_guard<std::mutex> lock(coutMutex);
-      if (opLine.enabled)
-        opLine.update(padRight("Reverse BFS: expanding layer " + to_string(depth),
-                               REVERSE_BFS_LABEL_WIDTH) +
+      if (opLine.enabled) {
+        recordIfNewOp("expanding");
+        std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
+        std::string label = "Layer " + layerStr + ": expanding";
+        opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
                       progressBar(layer.size(),
                                   (std::max<size_t>)(1, layer.size())));
+      }
     }
 
     const size_t totalCandidates = [&]() {
@@ -432,14 +470,22 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           // Throttle updates (avoid heavy console + mutex overhead).
           auto now = std::chrono::steady_clock::now();
           if (opLine.enabled &&
-              std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count() >= 200) {
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - mergeStart).count();
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now - lastUpdate)
+                      .count() >= 200) {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          now - mergeStart)
+                          .count();
             std::lock_guard<std::mutex> lock(coutMutex);
-            opLine.update(padRight("Reverse BFS: merging layer " + to_string(depth),
-                                   REVERSE_BFS_LABEL_WIDTH) +
-                          progressBar(processed, (std::max<size_t>)(1, totalCandidates)) +
-                          " | inserted " + formatNum(insertedThisLayer) +
-                          " | elapsed " + formatTimeMs((long long)ms));
+            recordIfNewOp("merging");
+            std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
+            std::string label = "Layer " + layerStr + ": merging";
+            opLine.update(
+                padRight(label, REVERSE_BFS_LABEL_WIDTH) +
+                progressBar(processed,
+                            (std::max<size_t>)(1, totalCandidates)) +
+                " | inserted " + formatNum(insertedThisLayer) + " | elapsed " +
+                formatTimeMs((long long)ms));
             lastUpdate = now;
           }
         }
@@ -453,18 +499,24 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
                       std::chrono::steady_clock::now() - mergeStart)
                       .count();
         if (totalCandidates == 0) {
-          opLine.update(padRight("Reverse BFS: merging layer " + to_string(depth),
-                                 REVERSE_BFS_LABEL_WIDTH) +
+          recordIfNewOp("merging");
+          std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
+          std::string label = "Layer " + layerStr + ": merging";
+          opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
                         "| (no candidates) | elapsed " +
                         formatTimeMs((long long)ms));
         } else if (!opLine.enabled) {
           // no-op (non-terminal)
         } else {
-          opLine.update(padRight("Reverse BFS: merging layer " + to_string(depth),
-                                 REVERSE_BFS_LABEL_WIDTH) +
-                        progressBar(processed, (std::max<size_t>)(1, totalCandidates)) +
-                        " | inserted " + formatNum(insertedThisLayer) +
-                        " | elapsed " + formatTimeMs((long long)ms));
+          recordIfNewOp("merging");
+          std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
+          std::string label = "Layer " + layerStr + ": merging";
+          opLine.update(
+              padRight(label, REVERSE_BFS_LABEL_WIDTH) +
+              progressBar(processed,
+                          (std::max<size_t>)(1, totalCandidates)) +
+              " | inserted " + formatNum(insertedThisLayer) + " | elapsed " +
+              formatTimeMs((long long)ms));
         }
       }
     }
@@ -477,16 +529,11 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     double pruneMs = 0.0;
     if (!qReverse.empty()) {
       auto pruneStart = std::chrono::steady_clock::now();
-      {
-        std::lock_guard<std::mutex> lock(coutMutex);
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::steady_clock::now() - reverseStart)
-                      .count();
-        opLine.update("Reverse BFS: pruning layer " + to_string(depth) +
-                      " | elapsed " + formatTimeMs((long long)ms));
-      }
+      // Detailed prune progress (scan/seed/closure with bars) is handled inside
+      // pruneSideImpl; no separate top-level "pruning layer" line needed.
       pruneSideImpl(parentReverse, qReverse, true, &opLine, &coutMutex,
-                    "Reverse BFS prune layer " + to_string(depth));
+                    "Layer " + padLeft(std::to_string((unsigned)depth), 2),
+                    &lastOp, &opLog);
       pruneMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - pruneStart)
                     .count();
@@ -496,7 +543,10 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     double totalMs = expandMs + pruneMs;
     {
       std::lock_guard<std::mutex> lock(coutMutex);
+      if (!opLine.lastLine.empty())
+        opLog.push_back(opLine.lastLine);
       opLine.clear();
+      lastOp.clear();
       printTableRow(
           {to_string(depth),
            formatNum(layerCount),
@@ -512,11 +562,6 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
            formatTimeMs((long long)totalMs),
            progCell},
           widths, rowAlign);
-      auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - reverseStart)
-                    .count();
-      opLine.update("Reverse BFS: completed layer " + to_string(depth) +
-                    " | elapsed " + formatTimeMs((long long)ms));
     }
 #ifdef _WIN32
     trimWorkingSetIfHighMemory();
@@ -525,8 +570,12 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
   }
   {
     std::lock_guard<std::mutex> lock(coutMutex);
+    if (!opLine.lastLine.empty())
+      opLog.push_back(opLine.lastLine);
     opLine.clear();
     printTableBorderBottom(widths);
+    for (const std::string &line : opLog)
+      std::cout << line << "\n";
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - reverseStart)
                   .count();
