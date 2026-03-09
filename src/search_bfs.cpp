@@ -2,6 +2,7 @@
 #include "search_impl.h"
 #include "search.h"
 #include "config.h"
+#include "display.h"
 
 #include <ankerl/unordered_dense.h>
 #include <algorithm>
@@ -164,8 +165,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     size_t layerCount = qReverse.size();
     {
       std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Reverse] Layer " << depth << ": expanding " << layerCount
-                << " states ("
+      std::cout << "[Reverse] Layer " << depth << ": expanding "
+                << formatNum(layerCount) << " states ("
                 << std::max(1, std::min(REVERSE_BFS_NUM_THREADS, (int)layerCount))
                 << " threads)..." << std::endl;
     }
@@ -197,8 +198,9 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
                                                                 layerStart)
               .count();
       std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Reverse] Layer " << depth << " done in " << expandMs
-                << " ms (expand " << expandMs << " ms). Reached base state."
+      std::cout << "[Reverse] Layer " << depth << " done in "
+                << formatTimeMs((long long)expandMs) << " (expand "
+                << formatTimeMs((long long)expandMs) << "). Reached base state."
                 << std::endl;
       break;
     }
@@ -264,10 +266,12 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     double totalMs = expandMs + pruneMs;
     {
       std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Reverse] Layer " << depth << " done in " << totalMs
-                << " ms (expand " << expandMs << " ms, prune " << pruneMs
-                << " ms). Queue size now " << qReverse.size() << ", map size "
-                << parentReverse.size() << "." << std::endl;
+      std::cout << "[Reverse] Layer " << depth << " done in "
+                << formatTimeMs((long long)totalMs) << " (expand "
+                << formatTimeMs((long long)expandMs) << ", prune "
+                << formatTimeMs((long long)pruneMs) << "). Queue size now "
+                << formatNum(qReverse.size()) << ", map size "
+                << formatNum(parentReverse.size()) << "." << std::endl;
     }
 #ifdef _WIN32
     trimWorkingSetIfHighMemory();
@@ -310,7 +314,7 @@ template <typename S> static void runForwardTask(ForwardTaskContext<S> *ctx) {
     {
       std::lock_guard<std::mutex> lock(coutMutex);
       std::cout << "[Forward] Layer " << forwardDepth << ": expanding "
-                << forwardLayerCount << " states..." << std::endl;
+                << formatNum(forwardLayerCount) << " states..." << std::endl;
     }
     auto forwardLayerStart = std::chrono::steady_clock::now();
     int minForwardTowersLeft = g_numPos;
@@ -372,10 +376,12 @@ template <typename S> static void runForwardTask(ForwardTaskContext<S> *ctx) {
     double totalMs = expandMs + pruneMs;
     {
       std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Forward] Layer " << forwardDepth << " done in " << totalMs
-                << " ms (expand " << expandMs << " ms, prune " << pruneMs
-                << " ms). Queue size now " << qForward.size() << ", map size "
-                << parentForward.size();
+      std::cout << "[Forward] Layer " << forwardDepth << " done in "
+                << formatTimeMs((long long)totalMs) << " (expand "
+                << formatTimeMs((long long)expandMs) << ", prune "
+                << formatTimeMs((long long)pruneMs) << "). Queue size now "
+                << formatNum(qForward.size()) << ", map size "
+                << formatNum(parentForward.size());
       if (stoppedByReverse)
         std::cout << " (stopped mid-layer: reverse finished)";
       std::cout << "." << std::endl;
@@ -490,9 +496,9 @@ buildPathFromReverseBfsImpl(StateType finalState) {
     tForward.join();
   }
 
-  std::cout << "\nReverse BFS visited " << totalReverseVisited
-            << " states (map size after pruning: " << parentReverse.size()
-            << ").\n";
+  std::cout << "\nReverse BFS visited " << formatNum(totalReverseVisited)
+            << " states (map size after pruning: "
+            << formatNum(parentReverse.size()) << ").\n";
 
   if (g_baselineFile && g_baselineFile->is_open()) {
     g_originalCoutBuf = std::cout.rdbuf();
@@ -553,12 +559,12 @@ buildPathFromReverseBfsImpl(StateType finalState) {
 
   {
     std::lock_guard<std::mutex> lock(coutMutex);
-    std::cout << "[Main] Found " << interceptCount
+    std::cout << "[Main] Found " << formatNum(interceptCount)
               << " states in both maps. Best intercept has forward depth "
               << forwardDepthOfImpl<S>(parentForward, meetState)
               << ", reverse depth "
               << reverseDepthOfImpl<S>(parentReverse, meetState) << ", total "
-              << bestTotal << " steps." << std::endl;
+              << formatNum((long long)bestTotal) << " steps." << std::endl;
   }
 
   if (interceptCount == 0) {

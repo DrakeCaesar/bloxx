@@ -1,6 +1,7 @@
 #include <ankerl/unordered_dense.h>
 #include <chrono>
 #include <functional>
+#include <iomanip>
 #include <iostream>
 #include <vector>
 #ifdef _WIN32
@@ -614,26 +615,29 @@ static SearchResult runSlidingWindow() {
             .count();
 
     // Print summary table
-    cout << "\n┌─────┬─────────┬──────────────┬────────────────┬──────────┬────"
+    cout << "\n┌─────┬─────────┬──────────────┬────────────────┬────────────┬────"
             "──┬───────"
             "┐\n";
-    cout << "│ Pos │  (r,c)  │    Kernel    │     States     │   Time   │ Imp  "
+    cout << "│ Pos │  (r,c)  │    Kernel    │     States     │    Time    │ Imp  "
             "│ "
             "Score │\n";
-    cout << "├─────┼─────────┼──────────────┼────────────────┼──────────┼──────"
+    cout << "├─────┼─────────┼──────────────┼────────────────┼────────────┼──────"
             "┼──────"
             "─┤\n";
     for (const auto &s : stats) {
-      printf("│ %3d │ (%d, %d)  │ %12d │ %14lld │ %6lldms │  %s  │ %5d │\n",
-             s.posIdx, s.row, s.col, s.kernelSize, s.statesExplored, s.timeMs,
-             s.improved ? "Y" : "N", s.scoreAfter);
+      cout << "│ " << setw(3) << s.posIdx << " │ (" << s.row << ", " << s.col
+           << ")  │ " << setw(12) << formatNum((size_t)s.kernelSize) << " │ "
+           << setw(14) << formatNum((long long)s.statesExplored) << " │ "
+           << setw(10) << formatTimeMs(s.timeMs) << " │  "
+           << (s.improved ? "Y" : "N") << "  │ " << setw(5) << s.scoreAfter
+           << " │\n";
     }
-    cout << "└─────┴─────────┴──────────────┴────────────────┴──────────┴──────"
+    cout << "└─────┴─────────┴──────────────┴────────────────┴────────────┴──────"
             "┴──────"
             "─┘\n";
     cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner]
-         << "): score " << currentScore << " (" << passMs << "ms, " << explored
-         << " states)\n\n";
+         << "): score " << currentScore << " (" << formatTimeMs((long long)passMs)
+         << ", " << formatNum(explored) << " states)\n\n";
 
     result.explored += explored;
 

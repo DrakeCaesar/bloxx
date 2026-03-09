@@ -1,10 +1,44 @@
 #pragma once
 
 #include <iostream>
+#include <string>
 
 #include "config.h"
 #include "grid_config.h"
 #include "state_utils.h"
+
+// Format integer with space thousands separators (e.g. 1234567 -> "1 234 567")
+inline std::string formatNum(size_t n) {
+  std::string s = std::to_string(n);
+  for (int i = (int)s.size() - 3; i > 0; i -= 3)
+    s.insert(i, 1, ' ');
+  return s;
+}
+inline std::string formatNum(long long n) {
+  if (n < 0) return "-" + formatNum((size_t)(-n));
+  return formatNum((size_t)n);
+}
+
+// Format milliseconds as "M min S s" or "S s" (e.g. 125000 -> "2 min 5 s", 45000 -> "45 s", 500 -> "0.5 s")
+inline std::string formatTimeMs(long long ms) {
+  if (ms < 0) return "-" + formatTimeMs(-ms);
+  if (ms < 1000) {
+    // Sub-second: show as "0.5 s" etc.
+    std::string s = std::to_string(static_cast<double>(ms) / 1000.0);
+    size_t dot = s.find('.');
+    if (dot != std::string::npos) {
+      while (s.size() > dot + 1 && s.back() == '0') s.pop_back();
+      if (s.back() == '.') s.pop_back();
+    }
+    return s + " s";
+  }
+  long long sec = ms / 1000;
+  long long min = sec / 60;
+  sec %= 60;
+  if (min > 0)
+    return std::to_string(min) + " min " + std::to_string(sec) + " s";
+  return std::to_string(sec) + " s";
+}
 
 inline const string &bgColor(int t, bool placed) {
   return placed ? COLORS[t] : EMPTY_BG;

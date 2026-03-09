@@ -117,7 +117,7 @@ const int UNLOCKED_TYPE_START = 2; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 5; // First level to process
+const int LEVEL_START = 1; // First level to process
 const int LEVEL_END = 5;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
@@ -132,9 +132,9 @@ const int REVERSE_BFS_NUM_THREADS = 1;
 // Reverse BFS pruning: only run when parent map size exceeds this
 const size_t REVERSE_BFS_PRUNE_THRESHOLD = 10000;
 // Reverse side: keep states with tower count <= minInQueue + this delta
-const int REVERSE_BFS_PRUNE_LOW_DELTA = 3;
+const int REVERSE_BFS_PRUNE_LOW_DELTA = 4;
 // Forward side: keep states with tower count >= maxInQueue - this delta
-const int REVERSE_BFS_PRUNE_HIGH_DELTA = 3;
+const int REVERSE_BFS_PRUNE_HIGH_DELTA = 4;
 
 // When true, run forward BFS in parallel with reverse and meet in the middle
 // (finds shorter path, uses more memory). When false, only reverse BFS runs;
