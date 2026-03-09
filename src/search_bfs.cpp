@@ -172,6 +172,7 @@ static void reverseExpandChunkProgressImpl(const QueueEntry *start, const QueueE
                                            std::vector<ReverseExpansion<S>> *out, StateType pathStartState,
                                            int reverseBaseType, std::atomic<size_t> *expandedStates) {
   const auto &backTable = PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
+  size_t localExpanded = 0;
   for (; start != end; ++start) {
     StateType cur = start->first;
     int curTowers = start->second;
@@ -190,9 +191,14 @@ static void reverseExpandChunkProgressImpl(const QueueEntry *start, const QueueE
         }
       }
     }
-    if (expandedStates)
-      expandedStates->fetch_add(1, std::memory_order_relaxed);
+    if (expandedStates) {
+      localExpanded++;
+      if (localExpanded % REVERSE_BFS_EXPANDED_STATUS_INTERVAL == 0)
+        expandedStates->fetch_add(REVERSE_BFS_EXPANDED_STATUS_INTERVAL, std::memory_order_relaxed);
+    }
   }
+  if (expandedStates && (localExpanded % REVERSE_BFS_EXPANDED_STATUS_INTERVAL != 0))
+    expandedStates->fetch_add(localExpanded % REVERSE_BFS_EXPANDED_STATUS_INTERVAL, std::memory_order_relaxed);
 }
 
 template <typename S> struct ReverseTaskContext {
@@ -784,20 +790,8 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
     StateType cur = pathStartState;
     while (cur != finalState) {
       auto tr = storageTrans<S>(*parentReverse.find(toStorageKey<S>(cur)));
-      StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
-      bool foundStep = false;
-      int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
-      for (int p = 0; p < g_numPos && !foundStep; p++) {
-        for (int t = stepTypeMin; t <= g_maxType[p] && !foundStep; t++) {
-          if (t == stateGet(cur, p))
-            continue;
-          if (canonical(stateSet(cur, p, t)) == parent) {
-            steps.push_back({p, t});
-            foundStep = true;
-          }
-        }
-      }
-      cur = parent;
+      steps.push_back({tr.getPos(), tr.getType()});
+      cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
     }
     return steps;
   }
@@ -873,20 +867,8 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
       auto tr = storageTrans<S>(*parentReverse.find(toStorageKey<S>(cur)));
       if (tr.getPos() == -1)
         break;
-      StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
-      bool foundStep = false;
-      int stepTypeMin = PATH_FROM_EMPTY ? 0 : 1;
-      for (int p = 0; p < g_numPos && !foundStep; p++) {
-        for (int t = stepTypeMin; t <= g_maxType[p] && !foundStep; t++) {
-          if (t == stateGet(cur, p))
-            continue;
-          if (canonical(stateSet(cur, p, t)) == parent) {
-            steps.push_back({p, t});
-            foundStep = true;
-          }
-        }
-      }
-      cur = parent;
+      steps.push_back({tr.getPos(), tr.getType()});
+      cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
     }
   }
 
