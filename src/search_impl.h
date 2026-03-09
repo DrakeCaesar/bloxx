@@ -125,8 +125,11 @@ inline int countTowersLeft(StateType s) {
 
 inline StateType applyPerm(StateType s, const int *perm) {
   StateType result = 0;
-  for (int i = 0; i < g_numPos; i++)
-    result = stateSet(result, perm[i], stateGet(s, i));
+  StateType remaining = s;
+  for (int i = 0; i < g_numPos; i++) {
+    result = stateSet(result, perm[i], stateGet(remaining, 0));
+    remaining = remaining >> 3;
+  }
   return result;
 }
 
@@ -136,11 +139,9 @@ inline StateType canonical(StateType s) {
   StateType best = s;
   for (int k = 1; k < g_numSymm; k++) {
     StateType t = applyPerm(s, g_symmPerm[k]);
-    if (t < best) {
-      best = t;
-      if (best == g_baseState)
-        return g_baseState;
-    }
+    best = (t < best) ? t : best;
+    if (best == g_baseState)
+      return g_baseState;
   }
   return best;
 }
@@ -155,9 +156,9 @@ inline std::pair<StateType, int> canonicalAndChildPos(StateType s, int pos) {
     if (t < best) {
       best = t;
       bestK = k;
-      if (best == g_baseState)
-        break;
     }
+    if (best == g_baseState)
+      break;
   }
   return {best, g_symmPerm[bestK][pos]};
 }
