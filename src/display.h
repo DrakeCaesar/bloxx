@@ -1,11 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <ostream>
-#include <algorithm>
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "config.h"
 #include "grid_config.h"
@@ -19,13 +19,15 @@ inline std::string formatNum(size_t n) {
   return s;
 }
 inline std::string formatNum(long long n) {
-  if (n < 0) return "-" + formatNum((size_t)(-n));
+  if (n < 0)
+    return "-" + formatNum((size_t)(-n));
   return formatNum((size_t)n);
 }
 
 // Format milliseconds as "M min S s" or "S s" (e.g. 125000 -> "2 min 5 s", 45000 -> "45 s", 500 -> "0.5 s")
 inline std::string formatTimeMs(long long ms) {
-  if (ms < 0) return "-" + formatTimeMs(-ms);
+  if (ms < 0)
+    return "-" + formatTimeMs(-ms);
   if (ms < 1000) {
     // Sub-second: always 3 decimals (e.g. 0.030 s, 0.267 s)
     char buf[24];
@@ -58,13 +60,18 @@ inline size_t utf8Codepoints(const std::string &s) {
   // Counts UTF-8 codepoints (assumes valid UTF-8). Good enough for console
   // column width when using single-cell glyphs (incl. Private Use Area).
   size_t n = 0;
-  for (size_t i = 0; i < s.size(); ) {
+  for (size_t i = 0; i < s.size();) {
     unsigned char c = (unsigned char)s[i];
-    if ((c & 0x80) == 0x00) i += 1;
-    else if ((c & 0xE0) == 0xC0) i += 2;
-    else if ((c & 0xF0) == 0xE0) i += 3;
-    else if ((c & 0xF8) == 0xF0) i += 4;
-    else i += 1;
+    if ((c & 0x80) == 0x00)
+      i += 1;
+    else if ((c & 0xE0) == 0xC0)
+      i += 2;
+    else if ((c & 0xF0) == 0xE0)
+      i += 3;
+    else if ((c & 0xF8) == 0xF0)
+      i += 4;
+    else
+      i += 1;
     n++;
   }
   return n;
@@ -72,24 +79,28 @@ inline size_t utf8Codepoints(const std::string &s) {
 
 // Progress bar: "[=========>    ] 45% (9/20)" when total > 0; width in chars
 inline std::string progressBar(size_t current, size_t total, int width = 30) {
-  if (total == 0) return "[  no total  ] 0% (0/0)";
-  if (current > total) current = total;
+  if (total == 0)
+    return "[  no total  ] 0% (0/0)";
+  if (current > total)
+    current = total;
   size_t pct = total ? (current * 100) / total : 0;
 
   // Private Use Area glyphs (as shown in the screenshot): EE00-EE05.
   // Empty:  EE00 (left cap), EE01 (mid), EE02 (right cap)
   // Filled: EE03 (left cap), EE04 (mid), EE05 (right cap)
-  const std::string L_EMPTY = "\xEE\xB8\x80";     // U+EE00
-  const std::string MID_EMPTY = "\xEE\xB8\x81";   // U+EE01
-  const std::string R_EMPTY = "\xEE\xB8\x82";     // U+EE02
-  const std::string L_FILL = "\xEE\xB8\x83";      // U+EE03
-  const std::string MID_FILL = "\xEE\xB8\x84";    // U+EE04
-  const std::string R_FILL = "\xEE\xB8\x85";      // U+EE05
+  const std::string L_EMPTY = "\xEE\xB8\x80";   // U+EE00
+  const std::string MID_EMPTY = "\xEE\xB8\x81"; // U+EE01
+  const std::string R_EMPTY = "\xEE\xB8\x82";   // U+EE02
+  const std::string L_FILL = "\xEE\xB8\x83";    // U+EE03
+  const std::string MID_FILL = "\xEE\xB8\x84";  // U+EE04
+  const std::string R_FILL = "\xEE\xB8\x85";    // U+EE05
 
   int inner = (std::max)(1, width);
   int filled = total ? (int)((current * (size_t)inner) / total) : 0;
-  if (filled < 0) filled = 0;
-  if (filled > inner) filled = inner;
+  if (filled < 0)
+    filled = 0;
+  if (filled > inner)
+    filled = inner;
   std::string bar;
   bar.reserve((size_t)inner * 3 + 64);
   bar += (filled > 0 ? L_FILL : L_EMPTY);
@@ -112,12 +123,11 @@ inline std::string progressBar(size_t current, size_t total, int width = 30) {
 }
 
 // Phase header for clear "what's running" (single line)
-inline void printPhaseHeader(const std::string &title) {
-  std::cout << "\n═══ " << title << " ═══\n";
-}
+inline void printPhaseHeader(const std::string &title) { std::cout << "\n═══ " << title << " ═══\n"; }
 inline void printOperation(const std::string &operation, const std::string &detail) {
   std::cout << "  - " << operation;
-  if (!detail.empty()) std::cout << "  " << detail;
+  if (!detail.empty())
+    std::cout << "  " << detail;
   std::cout << "\n";
 }
 inline void printPhaseTiming(const std::string &phaseName, long long elapsedMs) {
@@ -161,8 +171,7 @@ struct TableStyle {
   std::string bl = "└", bm = "┴", br = "┘";
 };
 
-inline void printTableBorderTop(const std::vector<int> &widths,
-                                const TableStyle &st = TableStyle{}) {
+inline void printTableBorderTop(const std::vector<int> &widths, const TableStyle &st = TableStyle{}) {
   std::cout << st.tl;
   for (size_t i = 0; i < widths.size(); i++) {
     std::cout << repeatUtf8(st.h, widths[i]);
@@ -171,8 +180,7 @@ inline void printTableBorderTop(const std::vector<int> &widths,
   std::cout << "\n";
 }
 
-inline void printTableBorderMid(const std::vector<int> &widths,
-                                const TableStyle &st = TableStyle{}) {
+inline void printTableBorderMid(const std::vector<int> &widths, const TableStyle &st = TableStyle{}) {
   std::cout << st.ml;
   for (size_t i = 0; i < widths.size(); i++) {
     std::cout << repeatUtf8(st.h, widths[i]);
@@ -181,8 +189,7 @@ inline void printTableBorderMid(const std::vector<int> &widths,
   std::cout << "\n";
 }
 
-inline void printTableBorderBottom(const std::vector<int> &widths,
-                                   const TableStyle &st = TableStyle{}) {
+inline void printTableBorderBottom(const std::vector<int> &widths, const TableStyle &st = TableStyle{}) {
   std::cout << st.bl;
   for (size_t i = 0; i < widths.size(); i++) {
     std::cout << repeatUtf8(st.h, widths[i]);
@@ -191,10 +198,8 @@ inline void printTableBorderBottom(const std::vector<int> &widths,
   std::cout << "\n";
 }
 
-inline void printTableRow(const std::vector<std::string> &cells,
-                          const std::vector<int> &widths,
-                          const std::vector<TableAlign> &aligns,
-                          const TableStyle &st = TableStyle{}) {
+inline void printTableRow(const std::vector<std::string> &cells, const std::vector<int> &widths,
+                          const std::vector<TableAlign> &aligns, const TableStyle &st = TableStyle{}) {
   std::cout << st.v;
   for (size_t i = 0; i < widths.size(); i++) {
     const std::string cell = i < cells.size() ? cells[i] : std::string{};
@@ -260,12 +265,8 @@ struct DynamicStatusLine {
 
 inline DynamicStatusLine *g_activeStatusLine = nullptr;
 
-inline const string &bgColor(int t, bool placed) {
-  return placed ? COLORS[t] : EMPTY_BG;
-}
-inline const string &fgColor(int t, bool placed) {
-  return placed ? FG_COLORS[t] : EMPTY_FG;
-}
+inline const string &bgColor(int t, bool placed) { return placed ? COLORS[t] : EMPTY_BG; }
+inline const string &fgColor(int t, bool placed) { return placed ? FG_COLORS[t] : EMPTY_FG; }
 
 // ── Grid display ─────────────────────────────────────────────────────────────
 
@@ -388,4 +389,3 @@ inline void printGrid(StateType s, uint64_t placedMask) {
     }
   }
 }
-

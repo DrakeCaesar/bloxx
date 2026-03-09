@@ -21,9 +21,7 @@ struct Transition {
   uint8_t packed; // child_pos*6 + prev_type (0-203), 255 = sentinel
 
   Transition(int8_t child_pos = -1, int8_t prev_type = 0)
-      : packed(child_pos == -1
-                   ? 255
-                   : static_cast<uint8_t>(child_pos * 6 + prev_type)) {}
+      : packed(child_pos == -1 ? 255 : static_cast<uint8_t>(child_pos * 6 + prev_type)) {}
 
   int8_t getPos() const { return packed == 255 ? -1 : packed / 6; }
   int8_t getType() const { return packed == 255 ? 0 : packed % 6; }

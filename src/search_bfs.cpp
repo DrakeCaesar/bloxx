@@ -1,11 +1,11 @@
 #include "search_bfs.h"
-#include "search_impl.h"
-#include "search.h"
 #include "config.h"
 #include "display.h"
+#include "search.h"
+#include "search_impl.h"
 
-#include <ankerl/unordered_dense.h>
 #include <algorithm>
+#include <ankerl/unordered_dense.h>
 #include <atomic>
 #include <chrono>
 #include <climits>
@@ -41,11 +41,9 @@ template <typename S> struct ReverseExpansion {
 };
 
 template <typename ParentSet>
-static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
-                          bool keepLowest, DynamicStatusLine *opLine = nullptr,
-                          std::mutex *coutMutex = nullptr,
-                          const std::string &label = "",
-                          std::string *lastOp = nullptr,
+static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue, bool keepLowest,
+                          DynamicStatusLine *opLine = nullptr, std::mutex *coutMutex = nullptr,
+                          const std::string &label = "", std::string *lastOp = nullptr,
                           std::vector<std::string> *opLog = nullptr) {
   using S = typename ParentSet::value_type;
   if (parentMap.size() <= REVERSE_BFS_PRUNE_THRESHOLD || queue.empty())
@@ -53,21 +51,16 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
 
   auto start = std::chrono::steady_clock::now();
   auto last = start;
-  auto update = [&](const std::string &phase, size_t cur, size_t total,
-                    bool force = false) {
+  auto update = [&](const std::string &phase, size_t cur, size_t total, bool force = false) {
     if (!opLine || !opLine->enabled || !coutMutex)
       return;
     if (!force) {
       auto now = std::chrono::steady_clock::now();
-      if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last)
-              .count() < REVERSE_BFS_STATUS_UPDATE_MS)
+      if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count() < REVERSE_BFS_STATUS_UPDATE_MS)
         return;
       last = now;
     }
-    auto ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start)
-            .count();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     std::lock_guard<std::mutex> lock(*coutMutex);
     std::string fullOp = label + ": " + phase;
     if (lastOp && *lastOp != fullOp) {
@@ -77,12 +70,10 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
     }
     if (total > 0) {
       std::string prefix = label + ": " + phase;
-      opLine->update(padRight(prefix, REVERSE_BFS_LABEL_WIDTH) +
-                     progressBar(cur, total) +
-                     " | elapsed " + formatTimeMs((long long)ms));
-    } else {
-      opLine->update(label + ": " + phase + " | elapsed " +
+      opLine->update(padRight(prefix, REVERSE_BFS_LABEL_WIDTH) + progressBar(cur, total) + " | elapsed " +
                      formatTimeMs((long long)ms));
+    } else {
+      opLine->update(label + ": " + phase + " | elapsed " + formatTimeMs((long long)ms));
     }
   };
 
@@ -94,16 +85,14 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
     maxTowers = std::max(maxTowers, tc);
   }
 
-  int cutoff = keepLowest ? (minTowers + REVERSE_BFS_PRUNE_LOW_DELTA)
-                          : (maxTowers - REVERSE_BFS_PRUNE_HIGH_DELTA);
+  int cutoff = keepLowest ? (minTowers + REVERSE_BFS_PRUNE_LOW_DELTA) : (maxTowers - REVERSE_BFS_PRUNE_HIGH_DELTA);
   std::vector<QueueEntry> toProcess;
   toProcess.reserve(queue.size());
   size_t scanIdx = 0;
   for (const auto &entry : queue) {
     scanIdx++;
     update("prune scan", scanIdx, queue.size());
-    if ((keepLowest && entry.second <= cutoff) ||
-        (!keepLowest && entry.second >= cutoff)) {
+    if ((keepLowest && entry.second <= cutoff) || (!keepLowest && entry.second >= cutoff)) {
       toProcess.push_back(entry);
     }
   }
@@ -111,17 +100,11 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
 
   if (toProcess.empty()) {
     if (keepLowest)
-      toProcess.push_back(
-          *std::min_element(queue.begin(), queue.end(),
-                            [](const QueueEntry &a, const QueueEntry &b) {
-                              return a.second < b.second;
-                            }));
+      toProcess.push_back(*std::min_element(
+          queue.begin(), queue.end(), [](const QueueEntry &a, const QueueEntry &b) { return a.second < b.second; }));
     else
-      toProcess.push_back(
-          *std::max_element(queue.begin(), queue.end(),
-                            [](const QueueEntry &a, const QueueEntry &b) {
-                              return a.second > b.second;
-                            }));
+      toProcess.push_back(*std::max_element(
+          queue.begin(), queue.end(), [](const QueueEntry &a, const QueueEntry &b) { return a.second > b.second; }));
   }
 
   ParentSet pruned;
@@ -147,8 +130,7 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
     if (tr.getPos() == -1)
       continue;
     StateType parent = canonical(stateSet(cur, tr.getPos(), tr.getType()));
-    if (parentMap.count(toStorageKey<S>(parent)) &&
-        pruned.find(toStorageKey<S>(parent)) == pruned.end()) {
+    if (parentMap.count(toStorageKey<S>(parent)) && pruned.find(toStorageKey<S>(parent)) == pruned.end()) {
       pruned.emplace(*parentMap.find(toStorageKey<S>(parent)));
       worklist.push_back({parent, countTowersLeft(parent)});
     }
@@ -160,12 +142,10 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
 }
 
 template <typename S>
-static void
-reverseExpandChunkImpl(const QueueEntry *start, const QueueEntry *end,
-                       std::vector<ReverseExpansion<S>> *out,
-                       StateType pathStartState, int reverseBaseType) {
-  const auto &backTable =
-      PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
+static void reverseExpandChunkImpl(const QueueEntry *start, const QueueEntry *end,
+                                   std::vector<ReverseExpansion<S>> *out, StateType pathStartState,
+                                   int reverseBaseType) {
+  const auto &backTable = PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
   for (; start != end; ++start) {
     StateType cur = start->first;
     int curTowers = start->second;
@@ -179,26 +159,19 @@ reverseExpandChunkImpl(const QueueEntry *start, const QueueEntry *end,
       for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
         if (!backTable[curType][prevType])
           continue;
-        auto [next, childPos] =
-            canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
-        int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
-                         (prevType != reverseBaseType ? 1 : 0);
-        out->push_back({encodeForStorage<S>(next, Transition{(int8_t)childPos,
-                                                             (int8_t)curType}),
-                        nextTowers});
+        auto [next, childPos] = canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
+        int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) + (prevType != reverseBaseType ? 1 : 0);
+        out->push_back({encodeForStorage<S>(next, Transition{(int8_t)childPos, (int8_t)curType}), nextTowers});
       }
     }
   }
 }
 
 template <typename S>
-static void
-reverseExpandChunkProgressImpl(const QueueEntry *start, const QueueEntry *end,
-                               std::vector<ReverseExpansion<S>> *out,
-                               StateType pathStartState, int reverseBaseType,
-                               std::atomic<size_t> *expandedStates) {
-  const auto &backTable =
-      PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
+static void reverseExpandChunkProgressImpl(const QueueEntry *start, const QueueEntry *end,
+                                           std::vector<ReverseExpansion<S>> *out, StateType pathStartState,
+                                           int reverseBaseType, std::atomic<size_t> *expandedStates) {
+  const auto &backTable = PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
   for (; start != end; ++start) {
     StateType cur = start->first;
     int curTowers = start->second;
@@ -211,13 +184,9 @@ reverseExpandChunkProgressImpl(const QueueEntry *start, const QueueEntry *end,
         for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
           if (!backTable[curType][prevType])
             continue;
-          auto [next, childPos] =
-              canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
-          int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
-                           (prevType != reverseBaseType ? 1 : 0);
-          out->push_back({encodeForStorage<S>(next, Transition{(int8_t)childPos,
-                                                               (int8_t)curType}),
-                          nextTowers});
+          auto [next, childPos] = canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
+          int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) + (prevType != reverseBaseType ? 1 : 0);
+          out->push_back({encodeForStorage<S>(next, Transition{(int8_t)childPos, (int8_t)curType}), nextTowers});
         }
       }
     }
@@ -228,8 +197,7 @@ reverseExpandChunkProgressImpl(const QueueEntry *start, const QueueEntry *end,
 
 template <typename S> struct ReverseTaskContext {
   std::deque<QueueEntry> *qReverse;
-  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
-      *parentReverse;
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> *parentReverse;
   StateType pathStartState;
   std::mutex *coutMutex;
   std::atomic<bool> *reverseFinished;
@@ -327,31 +295,24 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     std::string progCell;
     if (totalToRemove > 0) {
       progCell = padLeft(std::to_string((unsigned)pct), 3) + "% " +
-                 padLeft(formatNum(removed), formatNum(totalToRemove).size()) +
-                 "/" + formatNum(totalToRemove);
+                 padLeft(formatNum(removed), formatNum(totalToRemove).size()) + "/" + formatNum(totalToRemove);
     }
 
     {
       std::lock_guard<std::mutex> lock(coutMutex);
       recordIfNewOp("expanding");
-      auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - reverseStart)
+      auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - reverseStart)
                     .count();
       std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
       std::string label = "L" + layerStr;
-      opLine.update(label + ": expanding | states " + formatNum(layerCount) +
-                    " | towers " + to_string(minTowersLeft) + "-" +
-                    to_string(maxTowersLeft) + " | elapsed " +
-                    formatTimeMs((long long)ms));
+      opLine.update(label + ": expanding | states " + formatNum(layerCount) + " | towers " + to_string(minTowersLeft) +
+                    "-" + to_string(maxTowersLeft) + " | elapsed " + formatTimeMs((long long)ms));
     }
 
     if (reachedBase) {
       qReverse.clear();
       auto layerEnd = std::chrono::steady_clock::now();
-      double expandMs =
-          std::chrono::duration_cast<std::chrono::milliseconds>(layerEnd -
-                                                                layerStart)
-              .count();
+      double expandMs = std::chrono::duration_cast<std::chrono::milliseconds>(layerEnd - layerStart).count();
       totalExpandMs += expandMs;
       {
         std::lock_guard<std::mutex> lock(coutMutex);
@@ -359,35 +320,22 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           opLog.push_back(opLine.lastLine);
         opLine.clear();
         lastOp.clear();
-        printTableRow(
-            {to_string(depth),
-             formatNum(layerCount),
-             to_string(std::max(1, std::min(REVERSE_BFS_NUM_THREADS, (int)layerCount))),
-             to_string(minTowersLeft) + "-" + to_string(maxTowersLeft),
-             "0",
-             "0",
-             formatNum(totalReverseVisited),
-             formatNum(qReverse.size()),
-             formatNum(parentReverse.size()),
-             formatTimeMs((long long)expandMs),
-             formatTimeMs(0),
-             formatTimeMs((long long)expandMs),
-             progCell},
-            widths, rowAlign);
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::steady_clock::now() - reverseStart)
+        printTableRow({to_string(depth), formatNum(layerCount),
+                       to_string(std::max(1, std::min(REVERSE_BFS_NUM_THREADS, (int)layerCount))),
+                       to_string(minTowersLeft) + "-" + to_string(maxTowersLeft), "0", "0",
+                       formatNum(totalReverseVisited), formatNum(qReverse.size()), formatNum(parentReverse.size()),
+                       formatTimeMs((long long)expandMs), formatTimeMs(0), formatTimeMs((long long)expandMs), progCell},
+                      widths, rowAlign);
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - reverseStart)
                       .count();
         recordIfNewOp("reached base");
-        opLine.update("Reverse BFS: reached base state | elapsed " +
-                      formatTimeMs((long long)ms));
+        opLine.update("Reverse BFS: reached base state | elapsed " + formatTimeMs((long long)ms));
       }
       break;
     }
 
-    const int numThreads =
-        std::max(1, std::min(REVERSE_BFS_NUM_THREADS, (int)layer.size()));
-    const size_t chunkSize =
-        (layer.size() + (size_t)numThreads - 1) / (size_t)numThreads;
+    const int numThreads = std::max(1, std::min(REVERSE_BFS_NUM_THREADS, (int)layer.size()));
+    const size_t chunkSize = (layer.size() + (size_t)numThreads - 1) / (size_t)numThreads;
     std::vector<std::vector<ReverseExpansion<S>>> results((size_t)numThreads);
     for (int c = 0; c < numThreads; c++)
       results[c].reserve(layer.size() * 2);
@@ -396,13 +344,15 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     std::atomic<bool> expandDone{false};
     auto expandPhaseStart = std::chrono::steady_clock::now();
     auto lastStatusUpdate = expandPhaseStart;
-    constexpr int statusPollMs = 100; // wake often to check expandDone; throttle updates by REVERSE_BFS_STATUS_UPDATE_MS
+    constexpr int statusPollMs = 100; // wake often to check expandDone; throttle updates by
+                                      // REVERSE_BFS_STATUS_UPDATE_MS
     std::thread monitor([&]() {
       while (!expandDone.load(std::memory_order_relaxed)) {
         if (!opLine.enabled)
           break;
         auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastStatusUpdate).count() >= REVERSE_BFS_STATUS_UPDATE_MS) {
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastStatusUpdate).count() >=
+            REVERSE_BFS_STATUS_UPDATE_MS) {
           lastStatusUpdate = now;
           auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - expandPhaseStart).count();
           size_t cur = expandedStates.load(std::memory_order_relaxed);
@@ -411,8 +361,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
           std::string label = "L" + layerStr + ": expanding";
           opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
-                        progressBar(cur, (std::max<size_t>)(1, layer.size())) +
-                        " | elapsed " + formatTimeMs((long long)ms));
+                        progressBar(cur, (std::max<size_t>)(1, layer.size())) + " | elapsed " +
+                        formatTimeMs((long long)ms));
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(statusPollMs));
       }
@@ -422,11 +372,9 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     revThreads.reserve((size_t)numThreads);
     for (int c = 0; c < numThreads; c++) {
       const QueueEntry *chunkStart = layer.data() + (size_t)c * chunkSize;
-      const QueueEntry *chunkEnd =
-          layer.data() + std::min((size_t)(c + 1) * chunkSize, layer.size());
+      const QueueEntry *chunkEnd = layer.data() + std::min((size_t)(c + 1) * chunkSize, layer.size());
       if (chunkStart < chunkEnd)
-        revThreads.emplace_back(reverseExpandChunkProgressImpl<S>, chunkStart,
-                                chunkEnd, &results[c], pathStartState,
+        revThreads.emplace_back(reverseExpandChunkProgressImpl<S>, chunkStart, chunkEnd, &results[c], pathStartState,
                                 reverseBaseType, &expandedStates);
     }
     for (auto &t : revThreads)
@@ -440,8 +388,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
         std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
         std::string label = "L" + layerStr + ": expanding";
         opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
-                      progressBar(layer.size(),
-                                  (std::max<size_t>)(1, layer.size())));
+                      progressBar(layer.size(), (std::max<size_t>)(1, layer.size())));
       }
     }
 
@@ -473,23 +420,16 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           }
           // Throttle updates (avoid heavy console + mutex overhead).
           auto now = std::chrono::steady_clock::now();
-          if (opLine.enabled &&
-              std::chrono::duration_cast<std::chrono::milliseconds>(
-                  now - lastUpdate)
-                      .count() >= REVERSE_BFS_STATUS_UPDATE_MS) {
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          now - mergeStart)
-                          .count();
+          if (opLine.enabled && std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count() >=
+                                    REVERSE_BFS_STATUS_UPDATE_MS) {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - mergeStart).count();
             std::lock_guard<std::mutex> lock(coutMutex);
             recordIfNewOp("merging");
             std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
             std::string label = "L" + layerStr + ": merging";
-            opLine.update(
-                padRight(label, REVERSE_BFS_LABEL_WIDTH) +
-                progressBar(processed,
-                            (std::max<size_t>)(1, totalCandidates)) +
-                " | inserted " + formatNum(insertedThisLayer) + " | elapsed " +
-                formatTimeMs((long long)ms));
+            opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
+                          progressBar(processed, (std::max<size_t>)(1, totalCandidates)) + " | inserted " +
+                          formatNum(insertedThisLayer) + " | elapsed " + formatTimeMs((long long)ms));
             lastUpdate = now;
           }
         }
@@ -499,15 +439,13 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
       // ensure we still show a clear status line.
       {
         std::lock_guard<std::mutex> lock(coutMutex);
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::steady_clock::now() - mergeStart)
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - mergeStart)
                       .count();
         if (totalCandidates == 0) {
           recordIfNewOp("merging");
           std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
           std::string label = "L" + layerStr + ": merging";
-          opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
-                        "| (no candidates) | elapsed " +
+          opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) + "| (no candidates) | elapsed " +
                         formatTimeMs((long long)ms));
         } else if (!opLine.enabled) {
           // no-op (non-terminal)
@@ -515,32 +453,24 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           recordIfNewOp("merging");
           std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
           std::string label = "L" + layerStr + ": merging";
-          opLine.update(
-              padRight(label, REVERSE_BFS_LABEL_WIDTH) +
-              progressBar(processed,
-                          (std::max<size_t>)(1, totalCandidates)) +
-              " | inserted " + formatNum(insertedThisLayer) + " | elapsed " +
-              formatTimeMs((long long)ms));
+          opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
+                        progressBar(processed, (std::max<size_t>)(1, totalCandidates)) + " | inserted " +
+                        formatNum(insertedThisLayer) + " | elapsed " + formatTimeMs((long long)ms));
         }
       }
     }
 
     auto layerEnd = std::chrono::steady_clock::now();
-    double expandMs =
-        std::chrono::duration_cast<std::chrono::milliseconds>(layerEnd -
-                                                              layerStart)
-            .count();
+    double expandMs = std::chrono::duration_cast<std::chrono::milliseconds>(layerEnd - layerStart).count();
     double pruneMs = 0.0;
     if (!qReverse.empty()) {
       auto pruneStart = std::chrono::steady_clock::now();
       // Detailed prune progress (scan/seed/closure with bars) is handled inside
       // pruneSideImpl; no separate top-level "pruning layer" line needed.
       pruneSideImpl(parentReverse, qReverse, true, &opLine, &coutMutex,
-                    "L" + padLeft(std::to_string((unsigned)depth), 2),
-                    &lastOp, &opLog);
-      pruneMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - pruneStart)
-                    .count();
+                    "L" + padLeft(std::to_string((unsigned)depth), 2), &lastOp, &opLog);
+      pruneMs =
+          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - pruneStart).count();
     }
     totalExpandMs += expandMs;
     totalPruneMs += pruneMs;
@@ -551,21 +481,12 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
         opLog.push_back(opLine.lastLine);
       opLine.clear();
       lastOp.clear();
-      printTableRow(
-          {to_string(depth),
-           formatNum(layerCount),
-           to_string(numThreads),
-           to_string(minTowersLeft) + "-" + to_string(maxTowersLeft),
-           formatNum(totalCandidates),
-           formatNum(insertedThisLayer),
-           formatNum(totalReverseVisited),
-           formatNum(qReverse.size()),
-           formatNum(parentReverse.size()),
-           formatTimeMs((long long)expandMs),
-           formatTimeMs((long long)pruneMs),
-           formatTimeMs((long long)totalMs),
-           progCell},
-          widths, rowAlign);
+      printTableRow({to_string(depth), formatNum(layerCount), to_string(numThreads),
+                     to_string(minTowersLeft) + "-" + to_string(maxTowersLeft), formatNum(totalCandidates),
+                     formatNum(insertedThisLayer), formatNum(totalReverseVisited), formatNum(qReverse.size()),
+                     formatNum(parentReverse.size()), formatTimeMs((long long)expandMs),
+                     formatTimeMs((long long)pruneMs), formatTimeMs((long long)totalMs), progCell},
+                    widths, rowAlign);
     }
 #ifdef _WIN32
     trimWorkingSetIfHighMemory();
@@ -580,9 +501,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     printTableBorderBottom(widths);
     for (const std::string &line : opLog)
       std::cout << line << "\n";
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - reverseStart)
-                  .count();
+    auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - reverseStart).count();
     std::cout << "Reverse BFS done in " << formatTimeMs((long long)ms) << ".\n";
   }
   reverseFinished = true;
@@ -590,8 +510,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
 
 template <typename S> struct ForwardTaskContext {
   std::deque<QueueEntry> *qForward;
-  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
-      *parentForward;
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> *parentForward;
   StateType pathStartState;
   int reverseBaseType;
   std::atomic<bool> *reverseFinished;
@@ -609,15 +528,14 @@ template <typename S> static void runForwardTask(ForwardTaskContext<S> *ctx) {
   while (!qForward.empty()) {
     if (reverseFinished) {
       std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Forward] Reverse finished; stopping immediately."
-                << std::endl;
+      std::cout << "[Forward] Reverse finished; stopping immediately." << std::endl;
       break;
     }
     size_t forwardLayerCount = qForward.size();
     {
       std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Forward] Layer " << forwardDepth << ": expanding "
-                << formatNum(forwardLayerCount) << " states..." << std::endl;
+      std::cout << "[Forward] Layer " << forwardDepth << ": expanding " << formatNum(forwardLayerCount) << " states..."
+                << std::endl;
     }
     auto forwardLayerStart = std::chrono::steady_clock::now();
     int minForwardTowersLeft = g_numPos;
@@ -650,14 +568,9 @@ template <typename S> static void runForwardTask(ForwardTaskContext<S> *ctx) {
             continue;
           if (!canPlace(present, newType))
             continue;
-          auto [next, childPos] =
-              canonicalAndChildPos(stateSet(cur, pos, newType), pos);
-          if (parentForward
-                  .emplace(encodeForStorage<S>(
-                      next, Transition{(int8_t)childPos, (int8_t)curType}))
-                  .second) {
-            int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
-                             (newType != reverseBaseType ? 1 : 0);
+          auto [next, childPos] = canonicalAndChildPos(stateSet(cur, pos, newType), pos);
+          if (parentForward.emplace(encodeForStorage<S>(next, Transition{(int8_t)childPos, (int8_t)curType})).second) {
+            int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) + (newType != reverseBaseType ? 1 : 0);
             qForward.push_back({storageToState<S>(next), nextTowers});
           }
         }
@@ -665,25 +578,21 @@ template <typename S> static void runForwardTask(ForwardTaskContext<S> *ctx) {
     }
 
     auto forwardLayerEnd = std::chrono::steady_clock::now();
-    double expandMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          forwardLayerEnd - forwardLayerStart)
-                          .count();
+    double expandMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>(forwardLayerEnd - forwardLayerStart).count();
     double pruneMs = 0.0;
     if (!stoppedByReverse && !qForward.empty()) {
       auto pruneStart = std::chrono::steady_clock::now();
       pruneSideImpl(parentForward, qForward, false);
-      pruneMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - pruneStart)
-                    .count();
+      pruneMs =
+          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - pruneStart).count();
     }
     double totalMs = expandMs + pruneMs;
     {
       std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Forward] Layer " << forwardDepth << " done in "
-                << formatTimeMs((long long)totalMs) << " (expand "
-                << formatTimeMs((long long)expandMs) << ", prune "
-                << formatTimeMs((long long)pruneMs) << "). Queue size now "
-                << formatNum(qForward.size()) << ", map size "
+      std::cout << "[Forward] Layer " << forwardDepth << " done in " << formatTimeMs((long long)totalMs) << " (expand "
+                << formatTimeMs((long long)expandMs) << ", prune " << formatTimeMs((long long)pruneMs)
+                << "). Queue size now " << formatNum(qForward.size()) << ", map size "
                 << formatNum(parentForward.size());
       if (stoppedByReverse)
         std::cout << " (stopped mid-layer: reverse finished)";
@@ -702,10 +611,9 @@ template <typename S> static void runForwardTask(ForwardTaskContext<S> *ctx) {
 }
 
 template <typename S>
-static int forwardDepthOfImpl(
-    const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
-        &parentForward,
-    StateType s) {
+static int
+forwardDepthOfImpl(const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &parentForward,
+                   StateType s) {
   int d = 0;
   StateType cur = s;
   while (parentForward.count(toStorageKey<S>(cur))) {
@@ -719,10 +627,9 @@ static int forwardDepthOfImpl(
 }
 
 template <typename S>
-static int reverseDepthOfImpl(
-    const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
-        &parentReverse,
-    StateType s) {
+static int
+reverseDepthOfImpl(const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &parentReverse,
+                   StateType s) {
   int d = 0;
   StateType cur = s;
   while (parentReverse.count(toStorageKey<S>(cur))) {
@@ -735,9 +642,7 @@ static int reverseDepthOfImpl(
   return d;
 }
 
-template <typename S>
-static std::vector<std::pair<int, int>>
-buildPathFromReverseBfsImpl(StateType finalState) {
+template <typename S> static std::vector<std::pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) {
   const StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
   const int reverseBaseType = PATH_FROM_EMPTY ? 0 : 1;
 
@@ -745,10 +650,8 @@ buildPathFromReverseBfsImpl(StateType finalState) {
   SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
 #endif
 
-  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
-      parentReverse;
-  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
-      parentForward;
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> parentReverse;
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> parentForward;
 
   std::deque<QueueEntry> qReverse;
   std::deque<QueueEntry> qForward;
@@ -771,29 +674,32 @@ buildPathFromReverseBfsImpl(StateType finalState) {
                    "parallel. Forward stops when reverse finishes."
                 << std::endl;
     else
-      std::cout << "  [Main] Reverse BFS only (parallel forward disabled)."
-                << std::endl;
+      std::cout << "  [Main] Reverse BFS only (parallel forward disabled)." << std::endl;
 
     const std::vector<int> widths = {7, 12, 5, 11, 12, 12, 13, 12, 12, 10, 10, 10, 14};
     const std::vector<TableAlign> headerAlign(widths.size(), TableAlign::Center);
     printTableBorderTop(widths);
-    printTableRow({"Layer", "Expand", "Thr", "Towers", "Cand", "Insert", "Visited",
-                   "Queue", "Map", "ExpandT", "PruneT", "TotalT", "Prog"},
+    printTableRow({"Layer", "Expand", "Thr", "Towers", "Cand", "Insert", "Visited", "Queue", "Map", "ExpandT", "PruneT",
+                   "TotalT", "Prog"},
                   widths, headerAlign);
     printTableBorderMid(widths);
   }
 
-  ReverseTaskContext<S> revCtx{
-      &qReverse,        &parentReverse,       pathStartState, &coutMutex,
-      &reverseFinished, &totalReverseVisited, reverseBaseType,
-      countTowersLeft(finalState), countTowersLeft(pathStartState)};
+  ReverseTaskContext<S> revCtx{&qReverse,
+                               &parentReverse,
+                               pathStartState,
+                               &coutMutex,
+                               &reverseFinished,
+                               &totalReverseVisited,
+                               reverseBaseType,
+                               countTowersLeft(finalState),
+                               countTowersLeft(pathStartState)};
   std::thread tReverse(runReverseTask<S>, &revCtx);
   std::thread tForward;
   std::optional<ForwardTaskContext<S>> fwdCtx;
   if (RUN_PARALLEL_FORWARD_BFS) {
     fwdCtx =
-        ForwardTaskContext<S>{&qForward,       &parentForward,   pathStartState,
-                             reverseBaseType, &reverseFinished, &coutMutex};
+        ForwardTaskContext<S>{&qForward, &parentForward, pathStartState, reverseBaseType, &reverseFinished, &coutMutex};
     tForward = std::thread(runForwardTask<S>, &*fwdCtx);
   }
   tReverse.join();
@@ -809,8 +715,7 @@ buildPathFromReverseBfsImpl(StateType finalState) {
   }
 
   std::cout << "\nReverse BFS visited " << formatNum(totalReverseVisited)
-            << " states (map size after pruning: "
-            << formatNum(parentReverse.size()) << ").\n";
+            << " states (map size after pruning: " << formatNum(parentReverse.size()) << ").\n";
 
   if (g_baselineFile && g_baselineFile->is_open()) {
     g_originalCoutBuf = std::cout.rdbuf();
@@ -873,10 +778,9 @@ buildPathFromReverseBfsImpl(StateType finalState) {
     std::lock_guard<std::mutex> lock(coutMutex);
     std::cout << "[Main] Found " << formatNum(interceptCount)
               << " states in both maps. Best intercept has forward depth "
-              << forwardDepthOfImpl<S>(parentForward, meetState)
-              << ", reverse depth "
-              << reverseDepthOfImpl<S>(parentReverse, meetState) << ", total "
-              << formatNum((long long)bestTotal) << " steps." << std::endl;
+              << forwardDepthOfImpl<S>(parentForward, meetState) << ", reverse depth "
+              << reverseDepthOfImpl<S>(parentReverse, meetState) << ", total " << formatNum((long long)bestTotal)
+              << " steps." << std::endl;
   }
 
   if (interceptCount == 0) {

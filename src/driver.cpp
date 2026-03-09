@@ -30,20 +30,17 @@ int main() {
   auto totalStart = chrono::steady_clock::now();
 
   for (int level = LEVEL_START; level <= LEVEL_END; level++) {
-    for (int unlockedType = UNLOCKED_TYPE_START;
-         unlockedType <= UNLOCKED_TYPE_END; unlockedType++) {
+    for (int unlockedType = UNLOCKED_TYPE_START; unlockedType <= UNLOCKED_TYPE_END; unlockedType++) {
       currentIndex++;
-      cout << "Config " << currentIndex << "/" << totalConfigs << ": level "
-           << level << " unlocked 1-" << unlockedType << "  "
-           << progressBar((size_t)currentIndex, (size_t)totalConfigs) << "\n";
+      cout << "Config " << currentIndex << "/" << totalConfigs << ": level " << level << " unlocked 1-" << unlockedType
+           << "  " << progressBar((size_t)currentIndex, (size_t)totalConfigs) << "\n";
 
       // If running from build/, write baselines one level up; otherwise current
       // dir
       string prefix = "";
       if (std::filesystem::current_path().filename() == "build")
         prefix = "../";
-      string filename = prefix + "level" + to_string(level) + "_type" +
-                        to_string(unlockedType) + "_baseline.txt";
+      string filename = prefix + "level" + to_string(level) + "_type" + to_string(unlockedType) + "_baseline.txt";
       ofstream outFile(filename, std::ios::binary);
       if (!outFile) {
         cerr << "Failed to open " << filename << "\n";
@@ -68,15 +65,14 @@ int main() {
       g_baselineFile = nullptr;
       outFile.close();
 
-      cout << "  Level " << level << " (unlocked: 1-" << unlockedType
-           << ") complete in " << formatTimeMs((long long)runMs) << " -> " << filename << "\n";
+      cout << "  Level " << level << " (unlocked: 1-" << unlockedType << ") complete in "
+           << formatTimeMs((long long)runMs) << " -> " << filename << "\n";
     }
   }
 
   auto totalEnd = chrono::steady_clock::now();
   auto totalMs = chrono::duration_cast<chrono::milliseconds>(totalEnd - totalStart).count();
-  cout << "All " << totalConfigs << " baseline files generated in "
-       << formatTimeMs((long long)totalMs) << ".\n";
+  cout << "All " << totalConfigs << " baseline files generated in " << formatTimeMs((long long)totalMs) << ".\n";
 
   return 0;
 }

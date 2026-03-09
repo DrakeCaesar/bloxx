@@ -8,8 +8,7 @@
 // High-quality hash for std::pair<int,int> so ankerl uses it without extra mixing.
 // Hash the whole memory (unique object representation); README §3.2.6.
 namespace ankerl::unordered_dense {
-template <>
-struct hash<std::pair<int, int>> {
+template <> struct hash<std::pair<int, int>> {
   using is_avalanching = void;
   [[nodiscard]] size_t operator()(const std::pair<int, int> &p) const noexcept {
     static_assert(std::has_unique_object_representations_v<std::pair<int, int>>);
@@ -25,10 +24,10 @@ struct hash<std::pair<int, int>> {
 struct GridConfig {
   int rows;
   int cols;
-  vector<pair<int, int>> positions;    // list of (row, col) coords
+  vector<pair<int, int>> positions;                             // list of (row, col) coords
   ankerl::unordered_dense::map<pair<int, int>, int> coordToIdx; // coord -> position index
-  vector<vector<int>> neighbors; // neighbors[idx] = list of neighbor indices
-  vector<int> maxType;           // maxType[idx] = max tower type achievable
+  vector<vector<int>> neighbors;                                // neighbors[idx] = list of neighbor indices
+  vector<int> maxType;                                          // maxType[idx] = max tower type achievable
 
   int numPositions() const { return (int)positions.size(); }
 
@@ -99,26 +98,18 @@ inline GridConfig createGridFromPattern(const vector<string> &pattern) {
 }
 
 // Game grids (Tower Blox Deluxe levels)
-inline GridConfig createLevel1Grid() {
-  return createGridFromPattern({" .. ", "....", "....", " .. "});
-}
+inline GridConfig createLevel1Grid() { return createGridFromPattern({" .. ", "....", "....", " .. "}); }
 
-inline GridConfig createLevel2Grid() {
-  return createGridFromPattern({"....", "....", "....", "...."});
-}
+inline GridConfig createLevel2Grid() { return createGridFromPattern({"....", "....", "....", "...."}); }
 
-inline GridConfig createLevel3Grid() {
-  return createGridFromPattern({".....", ".....", "  .  ", ".....", "....."});
-}
+inline GridConfig createLevel3Grid() { return createGridFromPattern({".....", ".....", "  .  ", ".....", "....."}); }
 
 inline GridConfig createLevel4Grid() {
-  return createGridFromPattern(
-      {"......", "..  ..", " .... ", " .... ", "..  ..", "......"});
+  return createGridFromPattern({"......", "..  ..", " .... ", " .... ", "..  ..", "......"});
 };
 
 inline GridConfig createLevel5Grid() {
-  return createGridFromPattern({"    ...", " ......", " ......", " .. .. ",
-                                "...... ", "...... ", "...    "});
+  return createGridFromPattern({"    ...", " ......", " ......", " .. .. ", "...... ", "...... ", "...    "});
 };
 
 inline GridConfig createGrid(int level) {
@@ -136,9 +127,7 @@ inline GridConfig createGrid(int level) {
   }
 }
 
-inline GridConfig createGrid() {
-  return createGrid(LEVEL_START);
-}
+inline GridConfig createGrid() { return createGrid(LEVEL_START); }
 
 inline GridConfig &getGrid() {
   static GridConfig GRID = createGrid();

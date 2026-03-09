@@ -52,9 +52,7 @@ struct uint128_simd {
     return r;
   }
   uint128_simd operator&(uint64_t m) const { return uint128_simd(u.lo & m, 0); }
-  uint128_simd operator&(int m) const {
-    return uint128_simd(u.lo & static_cast<uint64_t>(m), 0);
-  }
+  uint128_simd operator&(int m) const { return uint128_simd(u.lo & static_cast<uint64_t>(m), 0); }
   uint128_simd operator|(uint128_simd o) const {
     uint128_simd r;
     r.v = _mm_or_si128(v, o.v);
@@ -73,21 +71,11 @@ struct uint128_simd {
     v = _mm_or_si128(v, o.v);
     return *this;
   }
-  bool operator==(uint128_simd o) const {
-    return u.lo == o.u.lo && u.hi == o.u.hi;
-  }
-  bool operator==(int o) const {
-    return u.hi == 0 && u.lo == static_cast<uint64_t>(o);
-  }
-  bool operator!=(uint128_simd o) const {
-    return u.lo != o.u.lo || u.hi != o.u.hi;
-  }
-  bool operator!=(int o) const {
-    return u.hi != 0 || u.lo != static_cast<uint64_t>(o);
-  }
-  bool operator<(uint128_simd o) const {
-    return u.hi != o.u.hi ? u.hi < o.u.hi : u.lo < o.u.lo;
-  }
+  bool operator==(uint128_simd o) const { return u.lo == o.u.lo && u.hi == o.u.hi; }
+  bool operator==(int o) const { return u.hi == 0 && u.lo == static_cast<uint64_t>(o); }
+  bool operator!=(uint128_simd o) const { return u.lo != o.u.lo || u.hi != o.u.hi; }
+  bool operator!=(int o) const { return u.hi != 0 || u.lo != static_cast<uint64_t>(o); }
+  bool operator<(uint128_simd o) const { return u.hi != o.u.hi ? u.hi < o.u.hi : u.lo < o.u.lo; }
   operator uint64_t() const { return u.lo; }
   operator int() const { return static_cast<int>(u.lo); }
 };
@@ -129,7 +117,7 @@ inline int &getCurrentLevel() {
 // Reverse BFS (path reconstruction): number of threads per layer
 const int REVERSE_BFS_NUM_THREADS = 1;
 // Throttle for status-line updates (expand/prune/merge progress); milliseconds
-const int REVERSE_BFS_STATUS_UPDATE_MS = 10000;
+const int REVERSE_BFS_STATUS_UPDATE_MS = 1000;
 
 // Reverse BFS pruning: only run when parent map size exceeds this
 const size_t REVERSE_BFS_PRUNE_THRESHOLD = 10000;
@@ -236,14 +224,11 @@ const string COLORS[] = {
     "\033[43m",  // Yellow background - type 4
     "\033[47m"   // White background  - type 5
 };
-const string COLOR_NAMES[] = {"Empty", "Blue",   "Red",
-                              "Green", "Yellow", "White"};
+const string COLOR_NAMES[] = {"Empty", "Blue", "Red", "Green", "Yellow", "White"};
 const string RESET = "\033[0m";
 const string BLACK_TEXT = "\033[30m"; // Black text for number
-const string EMPTY_BG =
-    "\033[100m"; // Grey background - empty/unplaced position
-const string EMPTY_FG =
-    "\033[90m"; // Grey foreground - empty position (grey bg + grey fg)
+const string EMPTY_BG = "\033[100m";  // Grey background - empty/unplaced position
+const string EMPTY_FG = "\033[90m";   // Grey foreground - empty position (grey bg + grey fg)
 
 // ANSI foreground colors for half-block separators (3x codes)
 // Index 0 = empty, 1-5 = tower types

@@ -112,8 +112,7 @@ static int scoreGrid(StateType state) {
 //
 // Tracks a physical (non-canonical) state so neighbor lookups against
 // GRID.neighbors[] remain consistent with position indices.
-static vector<pair<int, int>>
-expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
+static vector<pair<int, int>> expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
   vector<pair<int, int>> out;
   out.reserve(steps.size() * 2);
   uint64_t placed = 0; // bit i = physical position i has been explicitly placed
@@ -174,9 +173,8 @@ expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
   return out;
 }
 
-static void advanceStateForDisplay(StateType &canonState,
-                                   StateType &displayState,
-                                   uint64_t &placedMask, int pos, int newType) {
+static void advanceStateForDisplay(StateType &canonState, StateType &displayState, uint64_t &placedMask, int pos,
+                                   int newType) {
   int usedSymm = 0;
   for (int k = 0; k < g_numSymm; k++) {
     if (applyPerm(displayState, g_symmPerm[k]) == canonState) {
@@ -193,8 +191,7 @@ static void advanceStateForDisplay(StateType &canonState,
   placedMask |= (1ull << physPos);
 }
 
-static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
-                              StateType startState) {
+static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, StateType startState) {
   const bool fromEmpty = (startState == StateType(0));
   StateType canonState = startState;
   StateType displayState = startState;
@@ -257,19 +254,14 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
     advanceStateForDisplay(canonState, displayState, placedMask, pos, newType);
 
     auto [r, c] = GRID.positions[physPos];
-    cout << "\nStep " << stepNum << ": pos " << physPos << " (" << r << "," << c
-         << ")  ";
+    cout << "\nStep " << stepNum << ": pos " << physPos << " (" << r << "," << c << ")  ";
     if (oldType == -1) {
-      cout << "empty -> " << COLORS[newType] << BLACK_TEXT
-           << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
+      cout << "empty -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
     } else {
-      cout << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET
-           << " (" << oldType << ") -> " << COLORS[newType] << BLACK_TEXT
-           << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
+      cout << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET << " (" << oldType << ") -> "
+           << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
     }
-    cout << (valid ? "  \033[32m\u2713\033[0m"
-                   : "  \033[31m\u2717 INVALID\033[0m")
-         << "\n";
+    cout << (valid ? "  \033[32m\u2713\033[0m" : "  \033[31m\u2717 INVALID\033[0m") << "\n";
     printGrid(displayState, placedMask);
     stepNum++;
   }
@@ -281,10 +273,8 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
       if (!((placedMask >> i) & 1)) {
         placedMask |= (1ull << i);
         auto [r, c] = GRID.positions[i];
-        cout << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c
-             << ")  ";
-        cout << "empty -> " << COLORS[1] << BLACK_TEXT << COLOR_NAMES[1]
-             << RESET << " (1)";
+        cout << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c << ")  ";
+        cout << "empty -> " << COLORS[1] << BLACK_TEXT << COLOR_NAMES[1] << RESET << " (1)";
         cout << "  \033[32m\u2713\033[0m"
              << "\n";
         printGrid(displayState, placedMask);
@@ -295,8 +285,7 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
   }
 
   int reachedScore = scoreGrid(displayState);
-  cout << "\nBuild path: " << totalSteps << " steps, " << validSteps
-       << " valid, " << invalidSteps << " invalid";
+  cout << "\nBuild path: " << totalSteps << " steps, " << validSteps << " valid, " << invalidSteps << " invalid";
   if (invalidSteps == 0) {
     cout << " \033[32m\u2014 ALL VALID\033[0m";
   } else {
@@ -307,10 +296,8 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps,
 
 template <typename S>
 inline void printBuildPath(StateType bestState,
-                           const ankerl::unordered_dense::segmented_set<
-                               S, StorageHash<S>, StorageEqual<S>> &visited) {
-  vector<pair<int, int>>
-      steps; // (pos, newType) — pos in state *before* the move
+                           const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &visited) {
+  vector<pair<int, int>> steps; // (pos, newType) — pos in state *before* the move
   StateType cur = bestState;
   while (true) {
     auto tr = storageTrans<S>(*visited.find(toStorageKey<S>(cur)));
@@ -353,8 +340,7 @@ void printBuildPathSteps(const vector<pair<int, int>> &buildPath) {
 // BFS from base state (all blue) stopping as soon as target is reached.
 // Returns a set of encoded states (transition packed into top byte) for path
 // reconstruction.
-inline ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual>
-bfsShortestPath(StateType target) {
+inline ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> bfsShortestPath(StateType target) {
   ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> path;
   struct Entry {
     StateType state;
@@ -379,11 +365,8 @@ bfsShortestPath(StateType target) {
           continue;
         if (!canPlace(present, newType))
           continue;
-        auto [next, childPos] =
-            canonicalAndChildPos(stateSet(cur, pos, newType), pos);
-        if (path.emplace(encodeTransition(next, Transition{(int8_t)childPos,
-                                                           (int8_t)curType}))
-                .second)
+        auto [next, childPos] = canonicalAndChildPos(stateSet(cur, pos, newType), pos);
+        if (path.emplace(encodeTransition(next, Transition{(int8_t)childPos, (int8_t)curType})).second)
           q.push_back({next, curScore + (newType - curType)});
       }
     }
@@ -447,8 +430,7 @@ static vector<int> buildZigzagPath(int corner = 0) {
 
 // BFS within a window: exhaustively explore ALL reachable states
 // by modifying only positions within the window
-static void exploreWindow(StateType startState, int windowCenterIdx,
-                          vector<StateType> &newStates, int &bestScore,
+static void exploreWindow(StateType startState, int windowCenterIdx, vector<StateType> &newStates, int &bestScore,
                           StateType &bestState, long long &explored) {
   // Get kernel pattern window around position
   auto [cr, cc] = GRID.positions[windowCenterIdx];
@@ -478,8 +460,7 @@ static void exploreWindow(StateType startState, int windowCenterIdx,
 
   // Full BFS within window - explore ALL states reachable by modifying window
   // positions
-  ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual>
-      localVisited;
+  ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> localVisited;
   struct Entry {
     StateType state;
     int score;
@@ -545,8 +526,7 @@ static SearchResult runSlidingWindow() {
 
   // (kernel pattern intentionally not printed; keep output compact)
 
-  const char *cornerNames[] = {"top-left", "top-right", "bottom-left",
-                               "bottom-right"};
+  const char *cornerNames[] = {"top-left", "top-right", "bottom-left", "bottom-right"};
 
   struct WindowStats {
     int posIdx;
@@ -593,22 +573,16 @@ static SearchResult runSlidingWindow() {
 
       {
         string passName = string(1, (char)('A' + corner));
-        string win = padLeft(to_string(windowIdx + 1), 2) + "/" +
-                     padLeft(to_string(totalWindows), 2);
-        string center = "(" + padLeft(to_string(cr), 2) + "," +
-                        padLeft(to_string(cc), 2) + ")";
-        string line =
-            "  Pass " + passName + " " +
-            progressBar((size_t)(windowIdx + 1), (size_t)totalWindows) +
-            " | win " + win + " | center " + center + " | best " +
-            padLeft(to_string(bestScore), 3) + " | explored " +
-            padLeft(formatNum(explored), 12);
+        string win = padLeft(to_string(windowIdx + 1), 2) + "/" + padLeft(to_string(totalWindows), 2);
+        string center = "(" + padLeft(to_string(cr), 2) + "," + padLeft(to_string(cc), 2) + ")";
+        string line = "  Pass " + passName + " " + progressBar((size_t)(windowIdx + 1), (size_t)totalWindows) +
+                      " | win " + win + " | center " + center + " | best " + padLeft(to_string(bestScore), 3) +
+                      " | explored " + padLeft(formatNum(explored), 12);
         passLine.update(line);
       }
       auto t0 = chrono::steady_clock::now();
 
-      exploreWindow(currentState, posIdx, exploredStates, bestScore, bestState,
-                    explored);
+      exploreWindow(currentState, posIdx, exploredStates, bestScore, bestState, explored);
 
       auto t1 = chrono::steady_clock::now();
       auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
@@ -621,23 +595,16 @@ static SearchResult runSlidingWindow() {
       long long deltaStates = explored - exploredBefore;
       {
         string passName = string(1, (char)('A' + corner));
-        string win = padLeft(to_string(windowIdx + 1), 2) + "/" +
-                     padLeft(to_string(totalWindows), 2);
-        string center = "(" + padLeft(to_string(cr), 2) + "," +
-                        padLeft(to_string(cc), 2) + ")";
-        string line =
-            "  Pass " + passName + " " +
-            progressBar((size_t)(windowIdx + 1), (size_t)totalWindows) +
-            " | win " + win + " | center " + center + " | states " +
-            padLeft(formatNum(deltaStates), 12) + " | step " +
-            padLeft(formatTimeMs((long long)ms), 8) + " | best " +
-            padLeft(to_string(bestScore), 3) + " | explored " +
-            padLeft(formatNum(explored), 12);
+        string win = padLeft(to_string(windowIdx + 1), 2) + "/" + padLeft(to_string(totalWindows), 2);
+        string center = "(" + padLeft(to_string(cr), 2) + "," + padLeft(to_string(cc), 2) + ")";
+        string line = "  Pass " + passName + " " + progressBar((size_t)(windowIdx + 1), (size_t)totalWindows) +
+                      " | win " + win + " | center " + center + " | states " + padLeft(formatNum(deltaStates), 12) +
+                      " | step " + padLeft(formatTimeMs((long long)ms), 8) + " | best " +
+                      padLeft(to_string(bestScore), 3) + " | explored " + padLeft(formatNum(explored), 12);
         passLine.update(line);
       }
 
-      stats.push_back({posIdx, cr, cc, (int)exploredStates.size(),
-                       explored - exploredBefore, ms, improved, bestScore});
+      stats.push_back({posIdx, cr, cc, (int)exploredStates.size(), explored - exploredBefore, ms, improved, bestScore});
     }
     passLine.finish();
     g_activeStatusLine = nullptr;
@@ -645,60 +612,46 @@ static SearchResult runSlidingWindow() {
     currentScore = bestScore;
 
     auto passEnd = chrono::steady_clock::now();
-    auto passMs =
-        chrono::duration_cast<chrono::milliseconds>(passEnd - passStart)
-            .count();
+    auto passMs = chrono::duration_cast<chrono::milliseconds>(passEnd - passStart).count();
 
     // Print summary table (built from widths; no hardcoded border strings)
     cout << "\n";
     const vector<int> widths = {5, 9, 14, 16, 12, 6, 7};
-    const vector<TableAlign> headerAlign = {
-        TableAlign::Center, TableAlign::Center, TableAlign::Center,
-        TableAlign::Center, TableAlign::Center, TableAlign::Center,
-        TableAlign::Center};
-    const vector<TableAlign> rowAlign = {TableAlign::Right, TableAlign::Center,
-                                         TableAlign::Right, TableAlign::Right,
-                                         TableAlign::Right, TableAlign::Center,
-                                         TableAlign::Right};
+    const vector<TableAlign> headerAlign = {TableAlign::Center, TableAlign::Center, TableAlign::Center,
+                                            TableAlign::Center, TableAlign::Center, TableAlign::Center,
+                                            TableAlign::Center};
+    const vector<TableAlign> rowAlign = {TableAlign::Right, TableAlign::Center, TableAlign::Right, TableAlign::Right,
+                                         TableAlign::Right, TableAlign::Center, TableAlign::Right};
 
     printTableBorderTop(widths);
-    printTableRow({"Pos", "(r,c)", "Kernel", "States", "Time", "Imp", "Score"},
-                  widths, headerAlign);
+    printTableRow({"Pos", "(r,c)", "Kernel", "States", "Time", "Imp", "Score"}, widths, headerAlign);
     printTableBorderMid(widths);
     for (const auto &s : stats) {
-      printTableRow({to_string(s.posIdx),
-                     "(" + to_string(s.row) + ", " + to_string(s.col) + ")",
-                     formatNum((size_t)s.kernelSize),
-                     formatNum((long long)s.statesExplored),
-                     formatTimeMs(s.timeMs), (s.improved ? "Y" : "N"),
-                     to_string(s.scoreAfter)},
+      printTableRow({to_string(s.posIdx), "(" + to_string(s.row) + ", " + to_string(s.col) + ")",
+                     formatNum((size_t)s.kernelSize), formatNum((long long)s.statesExplored), formatTimeMs(s.timeMs),
+                     (s.improved ? "Y" : "N"), to_string(s.scoreAfter)},
                     widths, rowAlign);
     }
     printTableBorderBottom(widths);
-    cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner]
-         << "): score " << currentScore << " ("
-         << formatTimeMs((long long)passMs) << ", " << formatNum(explored)
-         << " states)\n\n";
+    cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner] << "): score " << currentScore << " ("
+         << formatTimeMs((long long)passMs) << ", " << formatNum(explored) << " states)\n\n";
 
     result.explored += explored;
 
-    cout << "Round " << roundNum << " complete: score " << scoreAtRoundStart
-         << " -> " << currentScore << "\n";
+    cout << "Round " << roundNum << " complete: score " << scoreAtRoundStart << " -> " << currentScore << "\n";
 
     if (currentScore <= scoreAtRoundStart) {
       cout << "No improvement in round " << roundNum << ", stopping.\n\n";
       break;
     } else {
-      cout << "Improved by " << (currentScore - scoreAtRoundStart)
-           << ", starting another round.\n\n";
+      cout << "Improved by " << (currentScore - scoreAtRoundStart) << ", starting another round.\n\n";
     }
   }
 
   result.bestScore = currentScore;
   result.bestState = currentState;
 
-  cout << "\nFinal score after " << roundNum
-       << " round(s): " << result.bestScore << "\n";
+  cout << "\nFinal score after " << roundNum << " round(s): " << result.bestScore << "\n";
 
   // ── Build path reconstruction: reverse BFS ─────────────────────────────
   printPhaseHeader("Path reconstruction (reverse BFS)");
@@ -708,9 +661,7 @@ static SearchResult runSlidingWindow() {
   vector<pair<int, int>> buildPath = buildPathFromReverseBfs(finalState);
   auto pathBuildEnd = chrono::steady_clock::now();
   printPhaseTiming("Path reconstruction",
-                   (long long)chrono::duration_cast<chrono::milliseconds>(
-                       pathBuildEnd - pathBuildStart)
-                       .count());
+                   (long long)chrono::duration_cast<chrono::milliseconds>(pathBuildEnd - pathBuildStart).count());
   if (buildPath.empty()) {
     cout << "\nBuild path not found by reverse BFS.\n";
     cout << "\nFinal score: " << result.bestScore << "\n";
@@ -739,8 +690,7 @@ static SearchResult runSlidingWindow() {
 // levels 3+.  Populates result and writes path reconstruction to cout (which
 // may be redirected to the baseline file by the caller).
 template <typename S> static void runBFSSearch(SearchResult &result) {
-  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>
-      visited;
+  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> visited;
 
   struct Entry {
     StateType state;
@@ -777,21 +727,16 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
         if (!canPlace(present, newType))
           continue;
 
-        auto [next, childPos] =
-            canonicalAndChildPos(stateSet(cur, pos, newType), pos);
+        auto [next, childPos] = canonicalAndChildPos(stateSet(cur, pos, newType), pos);
         int nextScore = curScore + (newType - curType);
-        if (visited
-                .emplace(encodeForStorage<S>(
-                    next, Transition{(int8_t)childPos, (int8_t)curType}))
-                .second)
+        if (visited.emplace(encodeForStorage<S>(next, Transition{(int8_t)childPos, (int8_t)curType})).second)
           q.push_back({next, nextScore});
       }
     }
 
     if (result.explored % 2000000 == 0)
-      cout << "Explored: " << result.explored
-           << " | Visited: " << visited.size()
-           << " | Best: " << result.bestScore << "\r" << flush;
+      cout << "Explored: " << result.explored << " | Visited: " << visited.size() << " | Best: " << result.bestScore
+           << "\r" << flush;
   }
 
   result.uniqueStates = visited.size();
@@ -812,7 +757,8 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
 void runSingleLevel() {
   auto totalStart = chrono::steady_clock::now();
 
-  // (run header + unlocked type legend intentionally not printed; keep output compact)
+  // (run header + unlocked type legend intentionally not printed; keep output
+  // compact)
   auto setupStart = chrono::steady_clock::now();
   buildLookupTables();
   buildSymmetries();
@@ -835,11 +781,8 @@ void runSingleLevel() {
   }
 
   auto phaseEnd = chrono::steady_clock::now();
-  long long phaseMs = (long long)chrono::duration_cast<chrono::milliseconds>(
-                          phaseEnd - phaseStart)
-                          .count();
-  const char *phaseName =
-      SEARCH_MODE == 1 ? "Sliding window" : (SEARCH_MODE == 2 ? "DFS" : "BFS");
+  long long phaseMs = (long long)chrono::duration_cast<chrono::milliseconds>(phaseEnd - phaseStart).count();
+  const char *phaseName = SEARCH_MODE == 1 ? "Sliding window" : (SEARCH_MODE == 2 ? "DFS" : "BFS");
   (void)phaseName;
   (void)phaseMs;
 
@@ -853,9 +796,7 @@ void runSingleLevel() {
   printGrid(result.bestState);
 
   auto totalEnd = chrono::steady_clock::now();
-  long long totalMs = (long long)chrono::duration_cast<chrono::milliseconds>(
-                          totalEnd - totalStart)
-                          .count();
+  long long totalMs = (long long)chrono::duration_cast<chrono::milliseconds>(totalEnd - totalStart).count();
   cout << "\n";
   cout << "Total time: " << formatTimeMs(totalMs) << "\n";
 

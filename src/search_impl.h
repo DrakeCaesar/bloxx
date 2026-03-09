@@ -25,8 +25,7 @@ extern int g_symmPerm[8][49];
 
 // ── Packed-transition embedding ─────────────────────────────────────────────
 static constexpr uint64_t PACKED_HI_SHIFT = 56;
-static const StateType STATE_MASK =
-    StateType(0xFFFFFFFFFFFFFFFFull, 0x00FFFFFFFFFFFFFFull);
+static const StateType STATE_MASK = StateType(0xFFFFFFFFFFFFFFFFull, 0x00FFFFFFFFFFFFFFull);
 
 inline StateType encodeTransition(StateType pureState, Transition tr) {
   return pureState | StateType(0, (uint64_t)tr.packed << PACKED_HI_SHIFT);
@@ -49,8 +48,7 @@ struct StateHash {
 };
 struct StateEqual {
   bool operator()(const StateType &a, const StateType &b) const noexcept {
-    return a.u.lo == b.u.lo &&
-           (a.u.hi & 0x00FFFFFFFFFFFFFFull) == (b.u.hi & 0x00FFFFFFFFFFFFFFull);
+    return a.u.lo == b.u.lo && (a.u.hi & 0x00FFFFFFFFFFFFFFull) == (b.u.hi & 0x00FFFFFFFFFFFFFFull);
   }
 };
 
@@ -61,28 +59,20 @@ struct StateEqual {
 inline bool usesStorage64();
 
 template <typename S> inline S toStorageKey(StateType s);
-template <> inline uint64_t toStorageKey<uint64_t>(StateType s) {
-  return s.u.lo;
-}
+template <> inline uint64_t toStorageKey<uint64_t>(StateType s) { return s.u.lo; }
 template <> inline StateType toStorageKey<StateType>(StateType s) { return s; }
 
 template <typename S> inline S encodeForStorage(StateType state, Transition tr);
-template <>
-inline uint64_t encodeForStorage<uint64_t>(StateType state, Transition tr) {
+template <> inline uint64_t encodeForStorage<uint64_t>(StateType state, Transition tr) {
   return state.u.lo | ((uint64_t)tr.packed << 56);
 }
-template <>
-inline StateType encodeForStorage<StateType>(StateType state, Transition tr) {
+template <> inline StateType encodeForStorage<StateType>(StateType state, Transition tr) {
   return encodeTransition(state, tr);
 }
 
 template <typename S> inline StateType storageToState(S s);
-template <> inline StateType storageToState<uint64_t>(uint64_t s) {
-  return StateType(s & 0x00FFFFFFFFFFFFFFull, 0);
-}
-template <> inline StateType storageToState<StateType>(StateType s) {
-  return s & STATE_MASK;
-}
+template <> inline StateType storageToState<uint64_t>(uint64_t s) { return StateType(s & 0x00FFFFFFFFFFFFFFull, 0); }
+template <> inline StateType storageToState<StateType>(StateType s) { return s & STATE_MASK; }
 
 template <typename S> inline Transition storageTrans(S s);
 template <> inline Transition storageTrans<uint64_t>(uint64_t s) {
@@ -90,16 +80,13 @@ template <> inline Transition storageTrans<uint64_t>(uint64_t s) {
   t.packed = static_cast<uint8_t>(s >> 56);
   return t;
 }
-template <> inline Transition storageTrans<StateType>(StateType s) {
-  return decodeTransition(s);
-}
+template <> inline Transition storageTrans<StateType>(StateType s) { return decodeTransition(s); }
 
 template <typename S> struct StorageHash;
 template <> struct StorageHash<uint64_t> {
   using is_avalanching = void;
   size_t operator()(uint64_t x) const noexcept {
-    return size_t(ankerl::unordered_dense::detail::wyhash::hash(
-        x & 0x00FFFFFFFFFFFFFFULL));
+    return size_t(ankerl::unordered_dense::detail::wyhash::hash(x & 0x00FFFFFFFFFFFFFFULL));
   }
 };
 template <> struct StorageHash<StateType> : StateHash {};

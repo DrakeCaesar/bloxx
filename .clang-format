@@ -1,0 +1,5 @@
+# ClangFormat config; used by clangd for formatting.
+# https://clang.llvm.org/docs/ClangFormatStyleOptions.html
+
+BasedOnStyle: LLVM
+ColumnLimit: 120

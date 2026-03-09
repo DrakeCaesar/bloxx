@@ -16,12 +16,11 @@ using namespace std;
 namespace {
 chrono::steady_clock::time_point g_dfsStart;
 constexpr size_t DFS_PROGRESS_INTERVAL = 50000;
-}
+} // namespace
 
 // Convert state sequence (path from start to goal) to build steps (pos,
 // newType).
-static vector<pair<int, int>>
-stateSequenceToSteps(const vector<StateType> &path) {
+static vector<pair<int, int>> stateSequenceToSteps(const vector<StateType> &path) {
   vector<pair<int, int>> steps;
   steps.reserve(path.empty() ? 0 : (path.size() - 1));
   for (size_t i = 0; i + 1 < path.size(); i++) {
@@ -48,28 +47,22 @@ stateSequenceToSteps(const vector<StateType> &path) {
 // Path = states only; parent = path[depth-1]. We only skip a state if we've
 // already reached it at a strictly shorter depth. When we improve (better
 // score or same score with shorter path) we store the full path.
-static void
-dfsVisit(StateType cur, int curScore, int depth, vector<StateType> &path,
-         ankerl::unordered_dense::segmented_map<StateType, int, StateHash, StateEqual>
-             &minDepth,
-         SearchResult &result, vector<StateType> &bestPath,
-         int &bestPathLength) {
+static void dfsVisit(StateType cur, int curScore, int depth, vector<StateType> &path,
+                     ankerl::unordered_dense::segmented_map<StateType, int, StateHash, StateEqual> &minDepth,
+                     SearchResult &result, vector<StateType> &bestPath, int &bestPathLength) {
   result.explored++;
   if (result.explored % DFS_PROGRESS_INTERVAL == 0 && result.explored > 0) {
-    auto elapsed = chrono::duration_cast<chrono::milliseconds>(
-                       chrono::steady_clock::now() - g_dfsStart).count();
-    cout << "  Explored " << formatNum(result.explored) << " states | best score "
-         << result.bestScore << " | elapsed " << formatTimeMs((long long)elapsed) << "\n";
+    auto elapsed = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - g_dfsStart).count();
+    cout << "  Explored " << formatNum(result.explored) << " states | best score " << result.bestScore << " | elapsed "
+         << formatTimeMs((long long)elapsed) << "\n";
   }
   int pathLen = (int)path.size() - 1;
-  if (curScore > result.bestScore ||
-      (curScore == result.bestScore && pathLen < bestPathLength)) {
+  if (curScore > result.bestScore || (curScore == result.bestScore && pathLen < bestPathLength)) {
     result.bestScore = curScore;
     result.bestState = cur;
     bestPathLength = pathLen;
     bestPath = path;
-    cout << "New best score: " << result.bestScore << " (path length "
-         << bestPathLength << ")\n";
+    cout << "New best score: " << result.bestScore << " (path length " << bestPathLength << ")\n";
     printGrid(cur);
   }
   if (depth >= DFS_MAX_DEPTH)
@@ -82,16 +75,14 @@ dfsVisit(StateType cur, int curScore, int depth, vector<StateType> &path,
         continue;
       if (!canPlace(present, newType))
         continue;
-      auto [next, childPos] =
-          canonicalAndChildPos(stateSet(cur, pos, newType), pos);
+      auto [next, childPos] = canonicalAndChildPos(stateSet(cur, pos, newType), pos);
       int nextDepth = depth + 1;
       auto it = minDepth.find(next);
       if (it != minDepth.end() && it->second <= nextDepth)
         continue;
       minDepth[next] = nextDepth;
       path.push_back(next);
-      dfsVisit(next, curScore + (newType - curType), nextDepth, path, minDepth,
-               result, bestPath, bestPathLength);
+      dfsVisit(next, curScore + (newType - curType), nextDepth, path, minDepth, result, bestPath, bestPathLength);
       path.pop_back();
     }
   }
@@ -120,8 +111,7 @@ void runDFSSearch(SearchResult &result) {
   auto dfsEnd = chrono::steady_clock::now();
   auto elapsedMs = chrono::duration_cast<chrono::milliseconds>(dfsEnd - g_dfsStart).count();
   printPhaseTiming("DFS search", (long long)elapsedMs);
-  cout << "  States explored: " << formatNum(result.explored)
-       << ", unique: " << formatNum(result.uniqueStates) << "\n";
+  cout << "  States explored: " << formatNum(result.explored) << ", unique: " << formatNum(result.uniqueStates) << "\n";
 
   if (g_baselineFile && g_baselineFile->is_open()) {
     g_originalCoutBuf = cout.rdbuf();

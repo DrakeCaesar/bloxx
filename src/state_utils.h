@@ -15,4 +15,3 @@ inline StateType stateSet(StateType s, int pos, int val) {
 }
 
 inline int stateGet(StateType s, int pos) { return (s >> (pos * 3)) & 7; }
-

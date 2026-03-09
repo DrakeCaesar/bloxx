@@ -23,4 +23,3 @@ struct SearchResult {
 
 // Print a build path (from reverse BFS or DFS). Uses PATH_FROM_EMPTY / expand.
 void printBuildPathSteps(const std::vector<std::pair<int, int>> &buildPath);
-
