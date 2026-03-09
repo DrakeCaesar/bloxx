@@ -40,8 +40,8 @@ template <typename S> struct ReverseExpansion {
   int nextTowers;
 };
 
-template <typename ParentSet>
-static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue, bool keepLowest,
+template <typename ParentSet, typename Queue>
+static void pruneSideImpl(ParentSet &parentMap, Queue &queue, bool keepLowest,
                           DynamicStatusLine *opLine = nullptr, std::mutex *coutMutex = nullptr,
                           const std::string &label = "", std::string *lastOp = nullptr,
                           std::vector<std::string> *opLog = nullptr) {
@@ -196,7 +196,7 @@ static void reverseExpandChunkProgressImpl(const QueueEntry *start, const QueueE
 }
 
 template <typename S> struct ReverseTaskContext {
-  std::deque<QueueEntry> *qReverse;
+  std::vector<QueueEntry> *qReverse;
   ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> *parentReverse;
   StateType pathStartState;
   std::mutex *coutMutex;
@@ -208,7 +208,7 @@ template <typename S> struct ReverseTaskContext {
 };
 
 template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
-  std::deque<QueueEntry> &qReverse = *ctx->qReverse;
+  std::vector<QueueEntry> &qReverse = *ctx->qReverse;
   auto &parentReverse = *ctx->parentReverse;
   StateType pathStartState = ctx->pathStartState;
   std::mutex &coutMutex = *ctx->coutMutex;
@@ -255,20 +255,15 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
   double totalExpandMs = 0.0;
   double totalPruneMs = 0.0;
   while (!qReverse.empty()) {
-    size_t layerCount = qReverse.size();
+    const size_t layerCount = qReverse.size();
+    const QueueEntry *layerData = qReverse.data();
     auto layerStart = std::chrono::steady_clock::now();
-
-    std::vector<QueueEntry> layer;
-    layer.reserve(layerCount);
-    for (size_t i = 0; i < layerCount; i++) {
-      layer.push_back(qReverse.front());
-      qReverse.pop_front();
-    }
 
     int minTowersLeft = g_numPos;
     int maxTowersLeft = 0;
     bool reachedBase = false;
-    for (const auto &entry : layer) {
+    for (size_t i = 0; i < layerCount; i++) {
+      const QueueEntry &entry = layerData[i];
       if (entry.first == pathStartState) {
         reachedBase = true;
         break;
@@ -334,11 +329,11 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
       break;
     }
 
-    const int numThreads = std::max(1, std::min(REVERSE_BFS_NUM_THREADS, (int)layer.size()));
-    const size_t chunkSize = (layer.size() + (size_t)numThreads - 1) / (size_t)numThreads;
+    const int numThreads = std::max(1, std::min(REVERSE_BFS_NUM_THREADS, (int)layerCount));
+    const size_t chunkSize = (layerCount + (size_t)numThreads - 1) / (size_t)numThreads;
     std::vector<std::vector<ReverseExpansion<S>>> results((size_t)numThreads);
     for (int c = 0; c < numThreads; c++)
-      results[c].reserve(layer.size() * 2);
+      results[c].reserve(layerCount * 2);
 
     std::atomic<size_t> expandedStates{0};
     std::atomic<bool> expandDone{false};
@@ -361,7 +356,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
           std::string label = "L" + layerStr + ": expanding";
           opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
-                        progressBar(cur, (std::max<size_t>)(1, layer.size())) + " | elapsed " +
+                        progressBar(cur, (std::max<size_t>)(1, layerCount)) + " | elapsed " +
                         formatTimeMs((long long)ms));
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(statusPollMs));
@@ -371,8 +366,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     std::vector<std::thread> revThreads;
     revThreads.reserve((size_t)numThreads);
     for (int c = 0; c < numThreads; c++) {
-      const QueueEntry *chunkStart = layer.data() + (size_t)c * chunkSize;
-      const QueueEntry *chunkEnd = layer.data() + std::min((size_t)(c + 1) * chunkSize, layer.size());
+      const QueueEntry *chunkStart = layerData + (size_t)c * chunkSize;
+      const QueueEntry *chunkEnd = layerData + std::min((size_t)(c + 1) * chunkSize, layerCount);
       if (chunkStart < chunkEnd)
         revThreads.emplace_back(reverseExpandChunkProgressImpl<S>, chunkStart, chunkEnd, &results[c], pathStartState,
                                 reverseBaseType, &expandedStates);
@@ -388,7 +383,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
         std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
         std::string label = "L" + layerStr + ": expanding";
         opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
-                      progressBar(layer.size(), (std::max<size_t>)(1, layer.size())));
+                      progressBar(layerCount, (std::max<size_t>)(1, layerCount)));
       }
     }
 
@@ -400,6 +395,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     }();
 
     size_t insertedThisLayer = 0;
+    std::vector<QueueEntry> nextLayer;
+    nextLayer.reserve(totalCandidates);
     {
       size_t processed = 0;
       auto lastUpdate = std::chrono::steady_clock::now();
@@ -411,7 +408,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           processed++;
           if (parentReverse.emplace(r.next).second) {
             totalReverseVisited++;
-            qReverse.push_back({storageToState<S>(r.next), r.nextTowers});
+            nextLayer.push_back({storageToState<S>(r.next), r.nextTowers});
             if (++insertedThisLayer % trimCheckInterval == 0) {
 #ifdef _WIN32
               trimWorkingSetIfHighMemory();
@@ -459,6 +456,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
         }
       }
     }
+
+    qReverse = std::move(nextLayer);
 
     auto layerEnd = std::chrono::steady_clock::now();
     double expandMs = std::chrono::duration_cast<std::chrono::milliseconds>(layerEnd - layerStart).count();
@@ -653,7 +652,7 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
   ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> parentReverse;
   ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> parentForward;
 
-  std::deque<QueueEntry> qReverse;
+  std::vector<QueueEntry> qReverse;
   std::deque<QueueEntry> qForward;
   if (RUN_PARALLEL_FORWARD_BFS) {
     parentForward.emplace(encodeForStorage<S>(pathStartState, {}));
