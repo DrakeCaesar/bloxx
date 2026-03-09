@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Tower Blox Deluxe Solver - A C++17 program that finds optimal solutions for the Tower Blox puzzle game through state-space search. The solver uses bit-packing, symmetry reduction, and novel sliding window optimizations to efficiently search large state spaces.
+Tower Blox Deluxe Solver - A C++20 program that finds optimal solutions for the Tower Blox puzzle game through state-space search. The solver uses bit-packing, symmetry reduction, and novel sliding window optimizations to efficiently search large state spaces.
 
 ## Build Commands
 
@@ -27,7 +27,7 @@ rm -rf build && cmake -B build && cmake --build build --config Release
 cmake --build build --config Release --target tower_solver
 ```
 
-The project uses CMake with C++17 standard. Release builds optimized with `/O3 /GL /arch:AVX2` (MSVC) or `-O3 -march=native -flto` (GCC/Clang).
+The project uses CMake with C++20 standard. Single dependency: [ankerl::unordered_dense](https://github.com/martinus/unordered_dense) (FetchContent). Release builds optimized with `/O3 /GL /arch:AVX2` (MSVC) or `-O3 -march=native -flto` (GCC/Clang).
 
 ## Core Architecture
 
@@ -38,14 +38,17 @@ The project uses CMake with C++17 standard. Release builds optimized with `/O3 /
 - Creates output files in format `level{N}_type{U}_baseline.txt`
 - Configures console UTF-8 mode on Windows
 
-**search.cpp** - Core solver implementation (~1355 lines):
-- State management, symmetry handling, and all search algorithms
+**search.cpp** - BFS/sliding-window orchestration, symmetry, lookup tables:
+- State management, symmetry handling, sliding window BFS
 - Hot-path functions marked `inline` for performance
 - Global lookup tables (`g_neighborShifts`, `g_symmPerm`) for zero-overhead access
 
+**search_bfs.cpp** - Reverse BFS for path reconstruction (mode 0 and after sliding window).
+**search_dfs.cpp** - Depth-limited DFS with min-depth visited set and in-memory path (mode 2).
+
 **Headers** (provide modularity and separation of concerns):
-- **config.h** - State type selection, constants, compile-time configuration
-- **grid_config.h** - Grid creation, neighbor computation, max type analysis
+- **config.h** - State type, constants, compile-time configuration (level/unlocked type ranges)
+- **grid_config.h** - Grid creation, neighbor computation, max type analysis; uses `ankerl::unordered_dense::map` for coord→index
 - **state_utils.h** - Bit manipulation (`stateSet`, `stateGet`)
 - **transition.h** - Compact 16-bit transition encoding for path reconstruction
 - **search.h** - Solver entry point, global file redirection
@@ -57,7 +60,7 @@ The project uses CMake with C++17 standard. Release builds optimized with `/O3 /
   - Stable ABI on Windows (MSVC/clang), passed in XMM registers
   - Supports all bitwise ops, shifts, and comparisons
   - Handles up to 42 positions × 3 bits/position=126 bits
-- **Compile-time selection**: State type chosen based on `LEVEL` (but currently forced to 128-bit for multi-level support)
+- **State type**: 128-bit for all levels (multi-level support). Single-level could use 64-bit for levels 1–3 via `getCurrentLevel()`.
 
 ### Performance-Critical Optimizations
 
@@ -80,18 +83,23 @@ The project uses CMake with C++17 standard. Release builds optimized with `/O3 /
 
 ### Search Algorithms
 
-Two search modes available (configure in config.h):
+Three search modes (configure in config.h via `SEARCH_MODE`):
 
 1. **BFS (0)**: Breadth-first search using queue
    - Guaranteed optimal solutions
    - Memory-intensive (stores all visited states)
-   - Native path reconstruction (no reverse BFS needed)
+   - Path reconstruction via reverse BFS in search_bfs.cpp
 
 2. **Sliding Window (1)**: Novel optimization for large grids
    - Default and most effective for levels 3-5
    - See detailed section below
+   - Path reconstruction via reverse BFS in search_bfs.cpp
 
-### Sliding Window Optimization (SEARCH_MODE=3)
+3. **DFS (2)**: Depth-limited DFS with min-depth visited set and in-memory path
+   - No reverse BFS; path derived from stored state sequence
+   - Depth limit `DFS_MAX_DEPTH`
+
+### Sliding Window Optimization (SEARCH_MODE=1)
 
 **Core Algorithm**:
 - Processes grid in overlapping windows following a JPEG-like zigzag path
@@ -134,18 +142,17 @@ Score = sum of (type - 1) for all positions (max type = 5 per position)
 **In config.h** - Key compile-time constants:
 
 **Grid & Search**:
-- `LEVEL`: Grid level 1-5 for single-level runs (currently overridden for multi-level)
-- `SEARCH_MODE`: Algorithm selector (0=BFS, 1=DFS, 2=IDDFS, 3=Sliding Window)
-- `MAX_UNLOCKED_TYPE`: Max tower type available (1-5, or 5 for all towers)
+- `SEARCH_MODE`: Algorithm selector (0=BFS, 1=Sliding Window, 2=DFS)
+- `DFS_MAX_DEPTH`: Max depth for DFS mode (2) only
 - `KERNEL_INDEX`: Selects window kernel pattern (0-5, see patterns below)
 
 **Sliding Window**:
 - `MAX_DEPTH`: BFS depth limit per window (default: 10)
 - `SCAFFOLD_DEPTH`: BFS depth for scaffolding moves during path reconstruction (default: 10)
 
-**Multi-Level Baseline**:
-- `LEVEL_START`, `LEVEL_END`: Level range to process (inclusive)
-- `UNLOCKED_TYPE_START`, `UNLOCKED_TYPE_END`: Tower type range to test
+**Multi-Level Baseline** (single source of truth for level and tower type):
+- `LEVEL_START`, `LEVEL_END`: Level range to process (inclusive), e.g. 1–5
+- `UNLOCKED_TYPE_START`, `UNLOCKED_TYPE_END`: Tower type range to test (e.g. 1–5)
 - `REVERSE_BFS_NUM_THREADS`: Threads for parallel reverse BFS (default: 8)
 
 **Window Kernel Patterns** (`KERNEL_PATTERNS` array):
@@ -183,8 +190,9 @@ Score = sum of (type - 1) for all positions (max type = 5 per position)
 - **Levels 4-5**: Sliding window essential (large state space)
 
 **Memory Usage**:
-- BFS: Grows linearly with visited states (GBs for large grids)
-- DFS: Stack depth only (MBs)
+- Large visited/parent containers use `ankerl::unordered_dense::segmented_set` / `segmented_map` for lower peak memory and smoother growth.
+- BFS: Grows with visited states (GBs for large grids)
+- DFS: Min-depth map + path stack (MBs to low GBs)
 - Sliding window: Window-sized frontier (MBs to low GBs)
 
 **CPU**:
@@ -192,10 +200,13 @@ Score = sum of (type - 1) for all positions (max type = 5 per position)
 - SIMD 128-bit ops efficiently vectorized by compiler
 - Threading only during reverse BFS (path reconstruction)
 
+**Hashing**:
+- All hash containers use [ankerl::unordered_dense](https://github.com/martinus/unordered_dense). Custom hashes (StateHash, StorageHash, `hash<std::pair<int,int>>`) use wyhash and `is_avalanching` for high-quality hashing without extra mixing.
+
 ## Development Guidelines
 
 **When Modifying**:
-- **State type**: Currently forced to 128-bit (`StateType = StateType128`) for multi-level support. Uncomment preprocessor selection for single-level optimization.
+- **State type**: 128-bit (`StateType = StateType128`) for multi-level support. For single-level, level is from `getCurrentLevel()` (set by driver).
 - **Bit packing**: 3 bits/position × 42 positions = 126 bits max (values 0-5; 0=empty, 1-5=tower types). Changing tower types requires updating all shift/mask logic.
 - **Grid patterns**: Use `createGridFromPattern()` with '.' for valid positions
 - **New levels**: Add to switch statement in `createGrid()` and recompute baselines
