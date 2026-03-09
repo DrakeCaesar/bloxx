@@ -5,11 +5,18 @@
 #include "search_impl.h"
 
 #include <ankerl/unordered_dense.h>
+#include <chrono>
 #include <climits>
 #include <iostream>
+#include <string>
 #include <vector>
 
 using namespace std;
+
+namespace {
+chrono::steady_clock::time_point g_dfsStart;
+constexpr size_t DFS_PROGRESS_INTERVAL = 50000;
+}
 
 // Convert state sequence (path from start to goal) to build steps (pos,
 // newType).
@@ -48,6 +55,12 @@ dfsVisit(StateType cur, int curScore, int depth, vector<StateType> &path,
          SearchResult &result, vector<StateType> &bestPath,
          int &bestPathLength) {
   result.explored++;
+  if (result.explored % DFS_PROGRESS_INTERVAL == 0 && result.explored > 0) {
+    auto elapsed = chrono::duration_cast<chrono::milliseconds>(
+                       chrono::steady_clock::now() - g_dfsStart).count();
+    cout << "  Explored " << formatNum(result.explored) << " states | best score "
+         << result.bestScore << " | elapsed " << formatTimeMs((long long)elapsed) << "\n";
+  }
   int pathLen = (int)path.size() - 1;
   if (curScore > result.bestScore ||
       (curScore == result.bestScore && pathLen < bestPathLength)) {
@@ -85,6 +98,9 @@ dfsVisit(StateType cur, int curScore, int depth, vector<StateType> &path,
 }
 
 void runDFSSearch(SearchResult &result) {
+  printOperation("DFS search", "max depth " + to_string(DFS_MAX_DEPTH));
+  g_dfsStart = chrono::steady_clock::now();
+
   ankerl::unordered_dense::segmented_map<StateType, int, StateHash, StateEqual> minDepth;
   vector<StateType> path;
   vector<StateType> bestPath;
@@ -100,6 +116,12 @@ void runDFSSearch(SearchResult &result) {
 
   dfsVisit(startState, 0, 0, path, minDepth, result, bestPath, bestPathLength);
   result.uniqueStates = minDepth.size();
+
+  auto dfsEnd = chrono::steady_clock::now();
+  auto elapsedMs = chrono::duration_cast<chrono::milliseconds>(dfsEnd - g_dfsStart).count();
+  printPhaseTiming("DFS search", (long long)elapsedMs);
+  cout << "  States explored: " << formatNum(result.explored)
+       << ", unique: " << formatNum(result.uniqueStates) << "\n";
 
   if (g_baselineFile && g_baselineFile->is_open()) {
     g_originalCoutBuf = cout.rdbuf();

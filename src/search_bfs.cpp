@@ -149,6 +149,8 @@ template <typename S> struct ReverseTaskContext {
   std::atomic<bool> *reverseFinished;
   size_t *totalReverseVisited;
   int reverseBaseType;
+  int startTowers;
+  int baseTowers;
 };
 
 template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
@@ -159,17 +161,32 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
   std::atomic<bool> &reverseFinished = *ctx->reverseFinished;
   size_t &totalReverseVisited = *ctx->totalReverseVisited;
   int reverseBaseType = ctx->reverseBaseType;
+  const int startTowers = ctx->startTowers;
+  const int baseTowers = ctx->baseTowers;
+
+  const std::vector<int> widths = {7, 12, 5, 11, 12, 12, 13, 12, 12, 10, 10, 10, 14};
+  const std::vector<TableAlign> headerAlign(widths.size(), TableAlign::Center);
+  const std::vector<TableAlign> rowAlign = {
+      TableAlign::Right,  // Layer
+      TableAlign::Right,  // Expand
+      TableAlign::Right,  // Thr
+      TableAlign::Center, // Towers
+      TableAlign::Right,  // Cand
+      TableAlign::Right,  // Insert
+      TableAlign::Right,  // Visited
+      TableAlign::Right,  // Queue
+      TableAlign::Right,  // Map
+      TableAlign::Right,  // ExpandT
+      TableAlign::Right,  // PruneT
+      TableAlign::Right,  // TotalT
+      TableAlign::Center  // Prog
+  };
 
   size_t depth = 0;
+  double totalExpandMs = 0.0;
+  double totalPruneMs = 0.0;
   while (!qReverse.empty()) {
     size_t layerCount = qReverse.size();
-    {
-      std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Reverse] Layer " << depth << ": expanding "
-                << formatNum(layerCount) << " states ("
-                << std::max(1, std::min(REVERSE_BFS_NUM_THREADS, (int)layerCount))
-                << " threads)..." << std::endl;
-    }
     auto layerStart = std::chrono::steady_clock::now();
 
     std::vector<QueueEntry> layer;
@@ -190,6 +207,29 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
       minTowersLeft = std::min(minTowersLeft, entry.second);
       maxTowersLeft = std::max(maxTowersLeft, entry.second);
     }
+    if (reachedBase && minTowersLeft > maxTowersLeft) {
+      minTowersLeft = baseTowers;
+      maxTowersLeft = baseTowers;
+    }
+
+    // Progress is enumerable by "towers left": startTowers -> baseTowers.
+    size_t totalToRemove = 0;
+    size_t removed = 0;
+    size_t pct = 0;
+    if (startTowers > baseTowers) {
+      totalToRemove = (size_t)(startTowers - baseTowers);
+      removed = (size_t)std::max(0, startTowers - minTowersLeft);
+      if (removed > totalToRemove)
+        removed = totalToRemove;
+      pct = totalToRemove ? (removed * 100) / totalToRemove : 0;
+    }
+    std::string progCell;
+    if (totalToRemove > 0) {
+      progCell = padLeft(std::to_string((unsigned)pct), 3) + "% " +
+                 padLeft(formatNum(removed), formatNum(totalToRemove).size()) +
+                 "/" + formatNum(totalToRemove);
+    }
+
     if (reachedBase) {
       qReverse.clear();
       auto layerEnd = std::chrono::steady_clock::now();
@@ -197,11 +237,25 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           std::chrono::duration_cast<std::chrono::milliseconds>(layerEnd -
                                                                 layerStart)
               .count();
-      std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Reverse] Layer " << depth << " done in "
-                << formatTimeMs((long long)expandMs) << " (expand "
-                << formatTimeMs((long long)expandMs) << "). Reached base state."
-                << std::endl;
+      totalExpandMs += expandMs;
+      {
+        std::lock_guard<std::mutex> lock(coutMutex);
+        printTableRow(
+            {to_string(depth),
+             formatNum(layerCount),
+             to_string(std::max(1, std::min(REVERSE_BFS_NUM_THREADS, (int)layerCount))),
+             to_string(minTowersLeft) + "-" + to_string(maxTowersLeft),
+             "0",
+             "0",
+             formatNum(totalReverseVisited),
+             formatNum(qReverse.size()),
+             formatNum(parentReverse.size()),
+             formatTimeMs((long long)expandMs),
+             formatTimeMs(0),
+             formatTimeMs((long long)expandMs),
+             progCell},
+            widths, rowAlign);
+      }
       break;
     }
 
@@ -232,22 +286,56 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
         t.join();
     }
 
+    const size_t totalCandidates = [&]() {
+      size_t n = 0;
+      for (int c = 0; c < numThreads; c++)
+        n += results[c].size();
+      return n;
+    }();
+
+    size_t insertedThisLayer = 0;
     {
-      size_t inserted = 0;
+      size_t processed = 0;
+
+      // Live progress within the layer during insertion/queueing (enumerable).
+      DynamicStatusLine mergeLine((!RUN_PARALLEL_FORWARD_BFS) && (g_originalCoutBuf == nullptr));
+      g_activeStatusLine = &mergeLine;
+      auto lastUpdate = std::chrono::steady_clock::now();
+      auto mergeStart = lastUpdate;
+
       constexpr size_t trimCheckInterval = 50000;
       for (int c = 0; c < numThreads; c++) {
         for (const auto &r : results[c]) {
+          processed++;
           if (parentReverse.emplace(r.next).second) {
             totalReverseVisited++;
             qReverse.push_back({storageToState<S>(r.next), r.nextTowers});
-            if (++inserted % trimCheckInterval == 0) {
+            if (++insertedThisLayer % trimCheckInterval == 0) {
 #ifdef _WIN32
               trimWorkingSetIfHighMemory();
 #endif
             }
           }
+          // Throttle updates (avoid heavy console + mutex overhead).
+          auto now = std::chrono::steady_clock::now();
+          if (mergeLine.enabled &&
+              std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count() >= 200) {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - mergeStart).count();
+            std::string line =
+                "  [Reverse] merge " + progressBar(processed, std::max<size_t>(1, totalCandidates)) +
+                " | inserted " + padLeft(formatNum(insertedThisLayer), 10) +
+                " | visited " + padLeft(formatNum(totalReverseVisited), 12) +
+                " | " + formatTimeMs((long long)ms);
+            mergeLine.update(line);
+            lastUpdate = now;
+          }
         }
       }
+      // Clear the live merge line so the table row overwrites it cleanly.
+      if (mergeLine.enabled)
+        mergeLine.clear();
+      if (g_activeStatusLine == &mergeLine)
+        g_activeStatusLine = nullptr;
     }
 
     auto layerEnd = std::chrono::steady_clock::now();
@@ -263,15 +351,26 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
                     std::chrono::steady_clock::now() - pruneStart)
                     .count();
     }
+    totalExpandMs += expandMs;
+    totalPruneMs += pruneMs;
     double totalMs = expandMs + pruneMs;
     {
       std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Reverse] Layer " << depth << " done in "
-                << formatTimeMs((long long)totalMs) << " (expand "
-                << formatTimeMs((long long)expandMs) << ", prune "
-                << formatTimeMs((long long)pruneMs) << "). Queue size now "
-                << formatNum(qReverse.size()) << ", map size "
-                << formatNum(parentReverse.size()) << "." << std::endl;
+      printTableRow(
+          {to_string(depth),
+           formatNum(layerCount),
+           to_string(numThreads),
+           to_string(minTowersLeft) + "-" + to_string(maxTowersLeft),
+           formatNum(totalCandidates),
+           formatNum(insertedThisLayer),
+           formatNum(totalReverseVisited),
+           formatNum(qReverse.size()),
+           formatNum(parentReverse.size()),
+           formatTimeMs((long long)expandMs),
+           formatTimeMs((long long)pruneMs),
+           formatTimeMs((long long)totalMs),
+           progCell},
+          widths, rowAlign);
     }
 #ifdef _WIN32
     trimWorkingSetIfHighMemory();
@@ -280,7 +379,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
   }
   {
     std::lock_guard<std::mutex> lock(coutMutex);
-    std::cout << "[Reverse] Queue empty. Reverse BFS finished." << std::endl;
+    printTableBorderBottom(widths);
   }
   reverseFinished = true;
 }
@@ -462,19 +561,28 @@ buildPathFromReverseBfsImpl(StateType finalState) {
 
   {
     std::lock_guard<std::mutex> lock(coutMutex);
+    printPhaseHeader("Reverse BFS");
     if (RUN_PARALLEL_FORWARD_BFS)
-      std::cout << "[Main] Starting reverse BFS (to completion) and forward "
-                   "BFS in parallel. Forward will stop as soon as reverse "
-                   "finishes."
+      std::cout << "  [Main] Reverse BFS (to completion) + forward BFS in "
+                   "parallel. Forward stops when reverse finishes."
                 << std::endl;
     else
-      std::cout << "[Main] Reverse BFS only (parallel forward disabled)."
+      std::cout << "  [Main] Reverse BFS only (parallel forward disabled)."
                 << std::endl;
+
+    const std::vector<int> widths = {7, 12, 5, 11, 12, 12, 13, 12, 12, 10, 10, 10, 14};
+    const std::vector<TableAlign> headerAlign(widths.size(), TableAlign::Center);
+    printTableBorderTop(widths);
+    printTableRow({"Layer", "Expand", "Thr", "Towers", "Cand", "Insert", "Visited",
+                   "Queue", "Map", "ExpandT", "PruneT", "TotalT", "Prog"},
+                  widths, headerAlign);
+    printTableBorderMid(widths);
   }
 
   ReverseTaskContext<S> revCtx{
       &qReverse,        &parentReverse,       pathStartState, &coutMutex,
-      &reverseFinished, &totalReverseVisited, reverseBaseType};
+      &reverseFinished, &totalReverseVisited, reverseBaseType,
+      countTowersLeft(finalState), countTowersLeft(pathStartState)};
   std::thread tReverse(runReverseTask<S>, &revCtx);
   std::thread tForward;
   std::optional<ForwardTaskContext<S>> fwdCtx;
