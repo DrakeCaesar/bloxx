@@ -42,10 +42,35 @@ template <typename S> struct ReverseExpansion {
 
 template <typename ParentSet>
 static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
-                          bool keepLowest) {
+                          bool keepLowest, DynamicStatusLine *opLine = nullptr,
+                          std::mutex *coutMutex = nullptr,
+                          const std::string &label = "") {
   using S = typename ParentSet::value_type;
   if (parentMap.size() <= REVERSE_BFS_PRUNE_THRESHOLD || queue.empty())
     return;
+
+  auto start = std::chrono::steady_clock::now();
+  auto last = start;
+  auto update = [&](const std::string &phase, size_t cur, size_t total) {
+    if (!opLine || !opLine->enabled || !coutMutex)
+      return;
+    auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last)
+            .count() < 200)
+      return;
+    auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - start)
+            .count();
+    std::lock_guard<std::mutex> lock(*coutMutex);
+    if (total > 0) {
+      opLine->update(label + ": " + phase + " " + progressBar(cur, total) +
+                     " | elapsed " + formatTimeMs((long long)ms));
+    } else {
+      opLine->update(label + ": " + phase + " | elapsed " +
+                     formatTimeMs((long long)ms));
+    }
+    last = now;
+  };
 
   int minTowers = g_numPos;
   int maxTowers = 0;
@@ -59,7 +84,10 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
                           : (maxTowers - REVERSE_BFS_PRUNE_HIGH_DELTA);
   std::vector<QueueEntry> toProcess;
   toProcess.reserve(queue.size());
+  size_t scanIdx = 0;
   for (const auto &entry : queue) {
+    scanIdx++;
+    update("scan", scanIdx, queue.size());
     if ((keepLowest && entry.second <= cutoff) ||
         (!keepLowest && entry.second >= cutoff)) {
       toProcess.push_back(entry);
@@ -83,11 +111,17 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
 
   ParentSet pruned;
   pruned.reserve(toProcess.size() * 4);
-  for (const auto &entry : toProcess)
-    pruned.emplace(*parentMap.find(toStorageKey<S>(entry.first)));
+  for (size_t i = 0; i < toProcess.size(); i++) {
+    update("seed", i + 1, toProcess.size());
+    pruned.emplace(*parentMap.find(toStorageKey<S>(toProcess[i].first)));
+  }
 
   std::deque<QueueEntry> worklist(toProcess.begin(), toProcess.end());
+  size_t processed = 0;
+  size_t workTotal = parentMap.size(); // upper bound
   while (!worklist.empty()) {
+    processed++;
+    update("closure", processed, workTotal);
     StateType cur = worklist.front().first;
     worklist.pop_front();
     auto it = parentMap.find(toStorageKey<S>(cur));
@@ -137,6 +171,41 @@ reverseExpandChunkImpl(const QueueEntry *start, const QueueEntry *end,
                         nextTowers});
       }
     }
+  }
+}
+
+template <typename S>
+static void
+reverseExpandChunkProgressImpl(const QueueEntry *start, const QueueEntry *end,
+                               std::vector<ReverseExpansion<S>> *out,
+                               StateType pathStartState, int reverseBaseType,
+                               std::atomic<size_t> *expandedStates) {
+  const auto &backTable =
+      PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
+  for (; start != end; ++start) {
+    StateType cur = start->first;
+    int curTowers = start->second;
+    if (cur != pathStartState) {
+      for (int pos = 0; pos < g_numPos; pos++) {
+        int curType = stateGet(cur, pos);
+        uint32_t present = neighborPresent(cur, pos);
+        if (!canPlace(present, curType))
+          continue;
+        for (int prevType = 0; prevType <= g_maxType[pos]; prevType++) {
+          if (!backTable[curType][prevType])
+            continue;
+          auto [next, childPos] =
+              canonicalAndChildPos(stateSet(cur, pos, prevType), pos);
+          int nextTowers = curTowers - (curType != reverseBaseType ? 1 : 0) +
+                           (prevType != reverseBaseType ? 1 : 0);
+          out->push_back({encodeForStorage<S>(next, Transition{(int8_t)childPos,
+                                                               (int8_t)curType}),
+                          nextTowers});
+        }
+      }
+    }
+    if (expandedStates)
+      expandedStates->fetch_add(1, std::memory_order_relaxed);
   }
 }
 
@@ -288,23 +357,46 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     for (int c = 0; c < numThreads; c++)
       results[c].reserve(layer.size() * 2);
 
-    if (numThreads == 1) {
-      reverseExpandChunkImpl<S>(layer.data(), layer.data() + layer.size(),
-                                &results[0], pathStartState, reverseBaseType);
-    } else {
-      std::vector<std::thread> revThreads;
-      for (int c = 0; c < numThreads; c++) {
-        const QueueEntry *chunkStart = layer.data() + (size_t)c * chunkSize;
-        const QueueEntry *chunkEnd =
-            layer.data() +
-            std::min((size_t)(c + 1) * chunkSize, layer.size());
-        if (chunkStart < chunkEnd)
-          revThreads.emplace_back(reverseExpandChunkImpl<S>, chunkStart,
-                                  chunkEnd, &results[c], pathStartState,
-                                  reverseBaseType);
+    std::atomic<size_t> expandedStates{0};
+    std::atomic<bool> expandDone{false};
+    auto expandPhaseStart = std::chrono::steady_clock::now();
+    std::thread monitor([&]() {
+      while (!expandDone.load(std::memory_order_relaxed)) {
+        if (!opLine.enabled)
+          break;
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - expandPhaseStart)
+                      .count();
+        size_t cur = expandedStates.load(std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(coutMutex);
+        opLine.update("Reverse BFS: expanding layer " + to_string(depth) + " " +
+                      progressBar(cur, (std::max<size_t>)(1, layer.size())) +
+                      " | elapsed " + formatTimeMs((long long)ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
       }
-      for (auto &t : revThreads)
-        t.join();
+    });
+
+    std::vector<std::thread> revThreads;
+    revThreads.reserve((size_t)numThreads);
+    for (int c = 0; c < numThreads; c++) {
+      const QueueEntry *chunkStart = layer.data() + (size_t)c * chunkSize;
+      const QueueEntry *chunkEnd =
+          layer.data() + std::min((size_t)(c + 1) * chunkSize, layer.size());
+      if (chunkStart < chunkEnd)
+        revThreads.emplace_back(reverseExpandChunkProgressImpl<S>, chunkStart,
+                                chunkEnd, &results[c], pathStartState,
+                                reverseBaseType, &expandedStates);
+    }
+    for (auto &t : revThreads)
+      t.join();
+    expandDone.store(true, std::memory_order_relaxed);
+    monitor.join();
+    {
+      std::lock_guard<std::mutex> lock(coutMutex);
+      if (opLine.enabled)
+        opLine.update("Reverse BFS: expanding layer " + to_string(depth) + " " +
+                      progressBar(layer.size(),
+                                  (std::max<size_t>)(1, layer.size())));
     }
 
     const size_t totalCandidates = [&]() {
@@ -387,7 +479,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
         opLine.update("Reverse BFS: pruning layer " + to_string(depth) +
                       " | elapsed " + formatTimeMs((long long)ms));
       }
-      pruneSideImpl(parentReverse, qReverse, true);
+      pruneSideImpl(parentReverse, qReverse, true, &opLine, &coutMutex,
+                    "Reverse BFS prune layer " + to_string(depth));
       pruneMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - pruneStart)
                     .count();
