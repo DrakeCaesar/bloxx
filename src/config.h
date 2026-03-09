@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -112,7 +113,7 @@ using StateType128 = uint128_simd;
 const int DFS_MAX_DEPTH = 17;
 
 // Baseline generation: generate baselines for unlocked types in this range
-const int UNLOCKED_TYPE_START = 5; // First type to generate baseline for
+const int UNLOCKED_TYPE_START = 2; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
@@ -127,6 +128,13 @@ inline int &getCurrentLevel() {
 
 // Reverse BFS (path reconstruction): number of threads per layer
 const int REVERSE_BFS_NUM_THREADS = 1;
+
+// Reverse BFS pruning: only run when parent map size exceeds this
+const size_t REVERSE_BFS_PRUNE_THRESHOLD = 10000;
+// Reverse side: keep states with tower count <= minInQueue + this delta
+const int REVERSE_BFS_PRUNE_LOW_DELTA = 3;
+// Forward side: keep states with tower count >= maxInQueue - this delta
+const int REVERSE_BFS_PRUNE_HIGH_DELTA = 3;
 
 // When true, run forward BFS in parallel with reverse and meet in the middle
 // (finds shorter path, uses more memory). When false, only reverse BFS runs;

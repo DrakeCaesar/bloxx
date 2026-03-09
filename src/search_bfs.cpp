@@ -1,6 +1,7 @@
 #include "search_bfs.h"
 #include "search_impl.h"
 #include "search.h"
+#include "config.h"
 
 #include <ankerl/unordered_dense.h>
 #include <algorithm>
@@ -42,10 +43,7 @@ template <typename ParentSet>
 static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
                           bool keepLowest) {
   using S = typename ParentSet::value_type;
-  static constexpr size_t kPruneThreshold = 10000;
-  static constexpr int kPruneLowDelta = 3;
-  static constexpr int kPruneHighDelta = 3;
-  if (parentMap.size() <= kPruneThreshold || queue.empty())
+  if (parentMap.size() <= REVERSE_BFS_PRUNE_THRESHOLD || queue.empty())
     return;
 
   int minTowers = g_numPos;
@@ -56,8 +54,8 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
     maxTowers = std::max(maxTowers, tc);
   }
 
-  int cutoff =
-      keepLowest ? (minTowers + kPruneLowDelta) : (maxTowers - kPruneHighDelta);
+  int cutoff = keepLowest ? (minTowers + REVERSE_BFS_PRUNE_LOW_DELTA)
+                          : (maxTowers - REVERSE_BFS_PRUNE_HIGH_DELTA);
   std::vector<QueueEntry> toProcess;
   toProcess.reserve(queue.size());
   for (const auto &entry : queue) {
