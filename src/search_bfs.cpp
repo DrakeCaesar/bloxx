@@ -726,6 +726,30 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
 
   if (!RUN_PARALLEL_FORWARD_BFS) {
     if (parentReverse.count(toStorageKey<S>(pathStartState)) == 0) {
+      // Reverse search never reached the desired start state. Summarize how
+      // close we got in terms of remaining towers and print sample states with
+      // the fewest towers left.
+      int baseTowers = countTowersLeft(pathStartState);
+      int minTowersLeft = g_numPos;
+      int maxTowersLeft = 0;
+      std::vector<StateType> lowestStates;
+      lowestStates.reserve(5);
+      size_t lowestCount = 0;
+      for (const auto &elem : parentReverse) {
+        StateType s = storageToState<S>(elem);
+        int t = countTowersLeft(s);
+        if (t < minTowersLeft) {
+          minTowersLeft = t;
+          lowestStates.clear();
+          lowestCount = 0;
+        }
+        if (t == minTowersLeft) {
+          if (lowestStates.size() < 5)
+            lowestStates.push_back(s);
+          lowestCount++;
+        }
+        maxTowersLeft = std::max(maxTowersLeft, t);
+      }
       if (g_originalCoutBuf) {
         std::cout.rdbuf(g_originalCoutBuf);
         g_originalCoutBuf = nullptr;
@@ -734,6 +758,28 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
       std::cout << "[Main] Reverse BFS did not reach path start. Cannot build "
                    "path."
                 << std::endl;
+      if (minTowersLeft <= g_numPos) {
+        std::cout << "[Main] Closest reverse states have " << minTowersLeft
+                  << " towers; path start requires " << baseTowers
+                  << ". Remaining map tower range: " << minTowersLeft << "-"
+                  << maxTowersLeft << "."
+                  << std::endl;
+        if (lowestCount > 0) {
+          size_t shown = lowestStates.size();
+          for (size_t i = 0; i < shown; i++) {
+            std::cout << "[Main] Lowest-tower state #" << (i + 1) << " ("
+                      << minTowersLeft << " towers):"
+                      << std::endl;
+            printGrid(lowestStates[i]);
+          }
+          if (lowestCount > shown) {
+            std::cout << "[Main] ... plus "
+                      << formatNum((long long)(lowestCount - shown))
+                      << " more lowest-tower states not shown."
+                      << std::endl;
+          }
+        }
+      }
       return {};
     }
     StateType cur = pathStartState;
