@@ -54,6 +54,9 @@ inline std::string padRight(const std::string &s, size_t width, char fill = ' ')
   return s + std::string(width - s.size(), fill);
 }
 
+// Fixed width for reverse BFS status labels so progress bars align in one column.
+inline constexpr size_t REVERSE_BFS_LABEL_WIDTH = 42;
+
 inline size_t utf8Codepoints(const std::string &s) {
   // Counts UTF-8 codepoints (assumes valid UTF-8). Good enough for console
   // column width when using single-cell glyphs (incl. Private Use Area).

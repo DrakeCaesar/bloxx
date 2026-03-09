@@ -63,7 +63,9 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
             .count();
     std::lock_guard<std::mutex> lock(*coutMutex);
     if (total > 0) {
-      opLine->update(label + ": " + phase + " " + progressBar(cur, total) +
+      std::string prefix = label + ": " + phase;
+      opLine->update(padRight(prefix, REVERSE_BFS_LABEL_WIDTH) +
+                     progressBar(cur, total) +
                      " | elapsed " + formatTimeMs((long long)ms));
     } else {
       opLine->update(label + ": " + phase + " | elapsed " +
@@ -369,7 +371,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
                       .count();
         size_t cur = expandedStates.load(std::memory_order_relaxed);
         std::lock_guard<std::mutex> lock(coutMutex);
-        opLine.update("Reverse BFS: expanding layer " + to_string(depth) + " " +
+        opLine.update(padRight("Reverse BFS: expanding layer " + to_string(depth),
+                               REVERSE_BFS_LABEL_WIDTH) +
                       progressBar(cur, (std::max<size_t>)(1, layer.size())) +
                       " | elapsed " + formatTimeMs((long long)ms));
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -394,7 +397,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     {
       std::lock_guard<std::mutex> lock(coutMutex);
       if (opLine.enabled)
-        opLine.update("Reverse BFS: expanding layer " + to_string(depth) + " " +
+        opLine.update(padRight("Reverse BFS: expanding layer " + to_string(depth),
+                               REVERSE_BFS_LABEL_WIDTH) +
                       progressBar(layer.size(),
                                   (std::max<size_t>)(1, layer.size())));
     }
@@ -431,8 +435,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
               std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count() >= 200) {
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - mergeStart).count();
             std::lock_guard<std::mutex> lock(coutMutex);
-            opLine.update("Reverse BFS: merging layer " + to_string(depth) +
-                          " " +
+            opLine.update(padRight("Reverse BFS: merging layer " + to_string(depth),
+                                   REVERSE_BFS_LABEL_WIDTH) +
                           progressBar(processed, (std::max<size_t>)(1, totalCandidates)) +
                           " | inserted " + formatNum(insertedThisLayer) +
                           " | elapsed " + formatTimeMs((long long)ms));
@@ -449,14 +453,16 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
                       std::chrono::steady_clock::now() - mergeStart)
                       .count();
         if (totalCandidates == 0) {
-          opLine.update("Reverse BFS: merging layer " + to_string(depth) +
-                        " | (no candidates) | elapsed " +
+          opLine.update(padRight("Reverse BFS: merging layer " + to_string(depth),
+                                 REVERSE_BFS_LABEL_WIDTH) +
+                        "| (no candidates) | elapsed " +
                         formatTimeMs((long long)ms));
         } else if (!opLine.enabled) {
           // no-op (non-terminal)
         } else {
-          opLine.update("Reverse BFS: merging layer " + to_string(depth) +
-                        " " + progressBar(processed, (std::max<size_t>)(1, totalCandidates)) +
+          opLine.update(padRight("Reverse BFS: merging layer " + to_string(depth),
+                                 REVERSE_BFS_LABEL_WIDTH) +
+                        progressBar(processed, (std::max<size_t>)(1, totalCandidates)) +
                         " | inserted " + formatNum(insertedThisLayer) +
                         " | elapsed " + formatTimeMs((long long)ms));
         }
