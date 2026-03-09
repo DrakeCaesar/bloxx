@@ -54,7 +54,8 @@ struct StateEqual {
   }
 };
 
-// StateHash/StateEqual (and StorageHash/StorageEqual) are used for ankerl sets/maps.
+// StateHash/StateEqual (and StorageHash/StorageEqual) are used for ankerl
+// sets/maps.
 
 // ── Dynamic storage type ───────────────────────────────────────────────────
 inline bool usesStorage64();
@@ -97,8 +98,8 @@ template <typename S> struct StorageHash;
 template <> struct StorageHash<uint64_t> {
   using is_avalanching = void;
   size_t operator()(uint64_t x) const noexcept {
-    return size_t(
-        ankerl::unordered_dense::detail::wyhash::hash(x & 0x00FFFFFFFFFFFFFFULL));
+    return size_t(ankerl::unordered_dense::detail::wyhash::hash(
+        x & 0x00FFFFFFFFFFFFFFULL));
   }
 };
 template <> struct StorageHash<StateType> : StateHash {};
