@@ -173,6 +173,14 @@ static vector<pair<int, int>> expandPathForEmptyBoard(const vector<pair<int, int
   return out;
 }
 
+// result[i] = s[perm[i]] (inverse of applyPerm for display: canon in frame k)
+static StateType applyInversePerm(StateType s, const int *perm) {
+  StateType result = 0;
+  for (int i = 0; i < g_numPos; i++)
+    result = stateSet(result, i, stateGet(s, perm[i]));
+  return result;
+}
+
 static void advanceStateForDisplay(StateType &canonState, StateType &displayState, uint64_t &placedMask, int pos,
                                    int newType) {
   int usedSymm = 0;
@@ -191,17 +199,35 @@ static void advanceStateForDisplay(StateType &canonState, StateType &displayStat
   placedMask |= (1ull << physPos);
 }
 
+// Try all 8 (or g_numSymm) frames; return k whose replay ends at finalCanonState, or -1.
+static int chooseFrameMatchingFinal(const vector<pair<int, int>> &expandedSteps, StateType startState,
+                                   StateType finalCanonState) {
+  for (int k = 0; k < g_numSymm; k++) {
+    int invPerm[49];
+    for (int i = 0; i < g_numPos; i++)
+      invPerm[g_symmPerm[k][i]] = i;
+    StateType display = applyInversePerm(startState, g_symmPerm[k]);
+    for (const auto &[pos, newType] : expandedSteps) {
+      int physPos = invPerm[pos];
+      display = stateSet(display, physPos, newType);
+    }
+    if (display == finalCanonState)
+      return k;
+  }
+  return -1;
+}
+
 static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, StateType startState) {
   const bool fromEmpty = (startState == StateType(0));
   StateType canonState = startState;
   StateType displayState = startState;
   uint64_t placedMask = 0;
 
-  // Pre-pass to compute total steps (and trailing implicit blues when from
-  // all-1).
+  // Pre-pass to compute total steps and final canonical state.
   for (auto [pos, newType] : expandedSteps)
     advanceStateForDisplay(canonState, displayState, placedMask, pos, newType);
 
+  StateType finalCanonState = canonState;
   int totalSteps = (int)expandedSteps.size();
   if (!fromEmpty) {
     int missingCount = 0;
@@ -212,34 +238,45 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, State
     totalSteps += missingCount;
   }
 
+  // Pick the frame whose replay ends at final canonical state (all 8 are cheap).
+  int fixedSymm = chooseFrameMatchingFinal(expandedSteps, startState, finalCanonState);
+  int inversePerm[49];
+  if (fixedSymm >= 0) {
+    for (int i = 0; i < g_numPos; i++)
+      inversePerm[g_symmPerm[fixedSymm][i]] = i;
+  }
+
   // Reset for actual print pass.
   canonState = startState;
-  displayState = startState;
+  displayState = (fixedSymm >= 0) ? applyInversePerm(startState, g_symmPerm[fixedSymm]) : startState;
   placedMask = 0;
 
   cout << "\n--- Build path (" << totalSteps << " steps) ---\n\n";
   cout << "Start (" << (fromEmpty ? "empty" : "all blue") << " board):\n";
-  printGrid(startState, uint64_t(0));
+  if (fixedSymm >= 0)
+    printGrid(applyInversePerm(startState, g_symmPerm[fixedSymm]), uint64_t(0));
+  else
+    printGrid(startState, uint64_t(0));
   int validSteps = 0, invalidSteps = 0;
   int stepNum = 1;
 
   for (auto [pos, newType] : expandedSteps) {
-    // pos is a position index in canonical space.
-    // Find which symmetry maps our displayState to its canonical form,
-    // then invert it to find the physical position.
-    int usedSymm = 0;
-    for (int k = 0; k < g_numSymm; k++) {
-      if (applyPerm(displayState, g_symmPerm[k]) == canonState) {
-        usedSymm = k;
-        break;
+    int usedSymm;
+    int physPos;
+    if (fixedSymm >= 0) {
+      usedSymm = fixedSymm;
+      physPos = inversePerm[pos];
+    } else {
+      int k = 0;
+      for (; k < g_numSymm; k++) {
+        if (applyPerm(displayState, g_symmPerm[k]) == canonState)
+          break;
       }
+      usedSymm = k;
+      for (int i = 0; i < g_numPos; i++)
+        inversePerm[g_symmPerm[usedSymm][i]] = i;
+      physPos = inversePerm[pos];
     }
-    // Build inverse permutation: inversePerm[canonical_pos] = physical_pos
-    int inversePerm[49];
-    for (int i = 0; i < g_numPos; i++)
-      inversePerm[g_symmPerm[usedSymm][i]] = i;
-
-    int physPos = inversePerm[pos];
     bool wasPlaced = (placedMask >> physPos) & 1;
     int oldType = wasPlaced ? stateGet(displayState, physPos) : -1;
 
