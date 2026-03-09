@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdio>
 #include <iostream>
 #include <ostream>
 #include <algorithm>
@@ -26,14 +27,10 @@ inline std::string formatNum(long long n) {
 inline std::string formatTimeMs(long long ms) {
   if (ms < 0) return "-" + formatTimeMs(-ms);
   if (ms < 1000) {
-    // Sub-second: show as "0.5 s" etc.
-    std::string s = std::to_string(static_cast<double>(ms) / 1000.0);
-    size_t dot = s.find('.');
-    if (dot != std::string::npos) {
-      while (s.size() > dot + 1 && s.back() == '0') s.pop_back();
-      if (s.back() == '.') s.pop_back();
-    }
-    return s + " s";
+    // Sub-second: always 3 decimals (e.g. 0.030 s, 0.267 s)
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%.3f s", static_cast<double>(ms) / 1000.0);
+    return std::string(buf);
   }
   long long sec = ms / 1000;
   long long min = sec / 60;
@@ -55,7 +52,7 @@ inline std::string padRight(const std::string &s, size_t width, char fill = ' ')
 }
 
 // Fixed width for reverse BFS status labels so progress bars align in one column.
-inline constexpr size_t REVERSE_BFS_LABEL_WIDTH = 42;
+inline constexpr size_t REVERSE_BFS_LABEL_WIDTH = 22;
 
 inline size_t utf8Codepoints(const std::string &s) {
   // Counts UTF-8 codepoints (assumes valid UTF-8). Good enough for console
@@ -104,9 +101,12 @@ inline std::string progressBar(size_t current, size_t total, int width = 30) {
   bar += "% (";
   std::string totalS = formatNum(total);
   std::string curS = formatNum(current);
-  bar += padLeft(curS, totalS.size());
+  // Minimum width = 9 digits with spaces (e.g. "123 456 789" -> 11 chars)
+  const size_t minNumWidth = formatNum(999999999ULL).size();
+  size_t numWidth = (std::max)(minNumWidth, (std::max)(totalS.size(), curS.size()));
+  bar += padLeft(curS, numWidth);
   bar += "/";
-  bar += totalS;
+  bar += padLeft(totalS, numWidth);
   bar += ")";
   return bar;
 }

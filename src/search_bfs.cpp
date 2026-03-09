@@ -60,7 +60,7 @@ static void pruneSideImpl(ParentSet &parentMap, std::deque<QueueEntry> &queue,
     if (!force) {
       auto now = std::chrono::steady_clock::now();
       if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last)
-              .count() < 200)
+              .count() < REVERSE_BFS_STATUS_UPDATE_MS)
         return;
       last = now;
     }
@@ -338,7 +338,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
                     std::chrono::steady_clock::now() - reverseStart)
                     .count();
       std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
-      std::string label = "Layer " + layerStr;
+      std::string label = "L" + layerStr;
       opLine.update(label + ": expanding | states " + formatNum(layerCount) +
                     " | towers " + to_string(minTowersLeft) + "-" +
                     to_string(maxTowersLeft) + " | elapsed " +
@@ -395,22 +395,26 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
     std::atomic<size_t> expandedStates{0};
     std::atomic<bool> expandDone{false};
     auto expandPhaseStart = std::chrono::steady_clock::now();
+    auto lastStatusUpdate = expandPhaseStart;
+    constexpr int statusPollMs = 100; // wake often to check expandDone; throttle updates by REVERSE_BFS_STATUS_UPDATE_MS
     std::thread monitor([&]() {
       while (!expandDone.load(std::memory_order_relaxed)) {
         if (!opLine.enabled)
           break;
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::steady_clock::now() - expandPhaseStart)
-                      .count();
-        size_t cur = expandedStates.load(std::memory_order_relaxed);
-        std::lock_guard<std::mutex> lock(coutMutex);
-        recordIfNewOp("expanding");
-        std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
-        std::string label = "Layer " + layerStr + ": expanding";
-        opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
-                      progressBar(cur, (std::max<size_t>)(1, layer.size())) +
-                      " | elapsed " + formatTimeMs((long long)ms));
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastStatusUpdate).count() >= REVERSE_BFS_STATUS_UPDATE_MS) {
+          lastStatusUpdate = now;
+          auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - expandPhaseStart).count();
+          size_t cur = expandedStates.load(std::memory_order_relaxed);
+          std::lock_guard<std::mutex> lock(coutMutex);
+          recordIfNewOp("expanding");
+          std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
+          std::string label = "L" + layerStr + ": expanding";
+          opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
+                        progressBar(cur, (std::max<size_t>)(1, layer.size())) +
+                        " | elapsed " + formatTimeMs((long long)ms));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(statusPollMs));
       }
     });
 
@@ -434,7 +438,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
       if (opLine.enabled) {
         recordIfNewOp("expanding");
         std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
-        std::string label = "Layer " + layerStr + ": expanding";
+        std::string label = "L" + layerStr + ": expanding";
         opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
                       progressBar(layer.size(),
                                   (std::max<size_t>)(1, layer.size())));
@@ -472,14 +476,14 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           if (opLine.enabled &&
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   now - lastUpdate)
-                      .count() >= 200) {
+                      .count() >= REVERSE_BFS_STATUS_UPDATE_MS) {
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                           now - mergeStart)
                           .count();
             std::lock_guard<std::mutex> lock(coutMutex);
             recordIfNewOp("merging");
             std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
-            std::string label = "Layer " + layerStr + ": merging";
+            std::string label = "L" + layerStr + ": merging";
             opLine.update(
                 padRight(label, REVERSE_BFS_LABEL_WIDTH) +
                 progressBar(processed,
@@ -501,7 +505,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
         if (totalCandidates == 0) {
           recordIfNewOp("merging");
           std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
-          std::string label = "Layer " + layerStr + ": merging";
+          std::string label = "L" + layerStr + ": merging";
           opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
                         "| (no candidates) | elapsed " +
                         formatTimeMs((long long)ms));
@@ -510,7 +514,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
         } else {
           recordIfNewOp("merging");
           std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
-          std::string label = "Layer " + layerStr + ": merging";
+          std::string label = "L" + layerStr + ": merging";
           opLine.update(
               padRight(label, REVERSE_BFS_LABEL_WIDTH) +
               progressBar(processed,
@@ -532,7 +536,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
       // Detailed prune progress (scan/seed/closure with bars) is handled inside
       // pruneSideImpl; no separate top-level "pruning layer" line needed.
       pruneSideImpl(parentReverse, qReverse, true, &opLine, &coutMutex,
-                    "Layer " + padLeft(std::to_string((unsigned)depth), 2),
+                    "L" + padLeft(std::to_string((unsigned)depth), 2),
                     &lastOp, &opLog);
       pruneMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - pruneStart)

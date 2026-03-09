@@ -117,8 +117,8 @@ const int UNLOCKED_TYPE_START = 5; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 5; // First level to process
-const int LEVEL_END = 5;   // Last level to process (inclusive)
+const int LEVEL_START = 2; // First level to process
+const int LEVEL_END = 2;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {
@@ -128,6 +128,8 @@ inline int &getCurrentLevel() {
 
 // Reverse BFS (path reconstruction): number of threads per layer
 const int REVERSE_BFS_NUM_THREADS = 1;
+// Throttle for status-line updates (expand/prune/merge progress); milliseconds
+const int REVERSE_BFS_STATUS_UPDATE_MS = 10000;
 
 // Reverse BFS pruning: only run when parent map size exceeds this
 const size_t REVERSE_BFS_PRUNE_THRESHOLD = 10000;
