@@ -83,21 +83,24 @@ The project uses CMake with C++20 standard. Single dependency: [ankerl::unordere
 
 ### Search Algorithms
 
-Three search modes (configure in config.h via `SEARCH_MODE`):
+Four search modes (configure in config.h via `SEARCH_MODE`):
 
 1. **BFS (0)**: Breadth-first search using queue
-   - Guaranteed optimal solutions
-   - Memory-intensive (stores all visited states)
-   - Path reconstruction via reverse BFS in search_bfs.cpp
+ - Guaranteed optimal solutions
+ - Memory-intensive (stores all visited states)
+ - Path reconstruction via reverse BFS in search_bfs.cpp
 
 2. **Sliding Window (1)**: Novel optimization for large grids
-   - Default and most effective for levels 3-5
-   - See detailed section below
-   - Path reconstruction via reverse BFS in search_bfs.cpp
+ - Default and most effective for levels 3-5
+ - See detailed section below
+ - Path reconstruction via reverse BFS in search_bfs.cpp
 
 3. **DFS (2)**: Depth-limited DFS with min-depth visited set and in-memory path
-   - No reverse BFS; path derived from stored state sequence
-   - Depth limit `DFS_MAX_DEPTH`
+ - No reverse BFS; path derived from stored state sequence
+ - Depth limit `DFS_MAX_DEPTH`
+
+4. **Sliding window only (3)**: Same sliding window as mode 1, but no path reconstruction
+ - Runs sliding window to find optimal board state only; no reverse BFS to empty/start
 
 ### Sliding Window Optimization (SEARCH_MODE=1)
 
@@ -142,7 +145,7 @@ Score = sum of (type - 1) for all positions (max type = 5 per position)
 **In config.h** - Key compile-time constants:
 
 **Grid & Search**:
-- `SEARCH_MODE`: Algorithm selector (0=BFS, 1=Sliding Window, 2=DFS)
+- `SEARCH_MODE`: Algorithm selector (0=BFS, 1=Sliding Window, 2=DFS, 3=Sliding window only)
 - `DFS_MAX_DEPTH`: Max depth for DFS mode (2) only
 - `KERNEL_INDEX`: Selects window kernel pattern (0-5, see patterns below)
 

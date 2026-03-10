@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <ankerl/unordered_dense.h>
 #include <chrono>
 #include <functional>
@@ -24,6 +25,9 @@ using namespace std;
 // Global file stream for baseline output (only used for reverse BFS section)
 ofstream *g_baselineFile = nullptr;
 streambuf *g_originalCoutBuf = nullptr;
+
+// Number of lines last drawn for "New best" block (for in-place redraw)
+static int s_newBestBlockLines = 0;
 
 // Globals (declared in search_impl.h)
 int g_numPos;
@@ -201,7 +205,7 @@ static void advanceStateForDisplay(StateType &canonState, StateType &displayStat
 
 // Try all 8 (or g_numSymm) frames; return k whose replay ends at finalCanonState, or -1.
 static int chooseFrameMatchingFinal(const vector<pair<int, int>> &expandedSteps, StateType startState,
-                                   StateType finalCanonState) {
+                                    StateType finalCanonState) {
   for (int k = 0; k < g_numSymm; k++) {
     int invPerm[49];
     for (int i = 0; i < g_numPos; i++)
@@ -412,91 +416,49 @@ inline ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> 
 }
 
 // ── Sliding Window Optimization ─────────────────────────────────────────────-
-// Processes grid using 3x3 windows with stride=1 along a JPEG-like zigzag path
-// Each window respects constraints from the entire grid (in+out of window)
+// Two window placement policies are supported:
+// - Center-based (original): choose a window *center* at an existing grid cell, require the kernel's
+//   bounding box to fit inside the grid rectangle, and build windows by centering the pattern.
+// - Top-left-based (new, rectangular kernels): choose a window *top-left* anywhere in the grid rectangle,
+//   skip placements based on per-strip overlap against the actual level pattern, and build windows
+//   by placing the pattern starting at (r0,c0).
 
-// Build zigzag path starting from a given corner
-// corner: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right
-static vector<int> buildZigzagPath(int corner = 0) {
-  int R = GRID.rows, C = GRID.cols;
-  vector<vector<pair<int, int>>> diagonals;
+struct KernelSize {
+  int rows = 0;
+  int cols = 0;
+};
 
-  // Group by diagonal - direction depends on corner
-  for (int r = 0; r < R; r++) {
-    for (int c = 0; c < C; c++) {
-      pair<int, int> coord = {r, c};
-      if (!GRID.coordToIdx.count(coord))
-        continue;
-
-      int diag;
-      switch (corner) {
-      case 0:
-        diag = r + c;
-        break; // top-left
-      case 1:
-        diag = r + (C - 1 - c);
-        break; // top-right
-      case 2:
-        diag = (R - 1 - r) + c;
-        break; // bottom-left
-      case 3:
-        diag = (R - 1 - r) + (C - 1 - c);
-        break; // bottom-right
-      default:
-        diag = r + c;
-        break;
-      }
-      if (diag >= (int)diagonals.size())
-        diagonals.resize(diag + 1);
-      diagonals[diag].push_back({r, c});
-    }
-  }
-
-  vector<int> path;
-  for (int d = 0; d < (int)diagonals.size(); d++) {
-    auto &diag = diagonals[d];
-    // Alternate direction for each diagonal (zigzag effect)
-    if (d % 2 == 1)
-      reverse(diag.begin(), diag.end());
-    for (auto [r, c] : diag) {
-      path.push_back(GRID.coordToIdx[{r, c}]);
-    }
-  }
-  return path;
+static KernelSize getKernelSize() {
+  const auto &pat = WINDOW_KERNEL_PATTERN;
+  KernelSize k;
+  k.rows = (int)pat.size();
+  for (const auto &row : pat)
+    k.cols = max(k.cols, (int)row.size());
+  return k;
 }
 
-// BFS within a window: exhaustively explore ALL reachable states
-// by modifying only positions within the window
-static void exploreWindow(StateType startState, int windowCenterIdx, vector<StateType> &newStates, int &bestScore,
-                          StateType &bestState, long long &explored) {
-  // Get kernel pattern window around position
-  auto [cr, cc] = GRID.positions[windowCenterIdx];
+// Shared helper: redraw the in-place "New best" block (score + grid).
+static void redrawNewBestBlock(int bestScore, StateType bestState) {
+  if (g_activeStatusLine)
+    g_activeStatusLine->clear();
+  vector<string> lines;
+  lines.push_back("New best: " + to_string(bestScore));
+  vector<string> gridLines = gridToLines(bestState);
+  for (auto &l : gridLines)
+    lines.push_back(l);
+  if (s_newBestBlockLines > 0)
+    cout << "\033[" << s_newBestBlockLines << "A";
+  for (size_t i = 0; i < lines.size(); i++)
+    cout << "\r\033[K" << lines[i] << "\n";
+  cout << flush;
+  s_newBestBlockLines = (int)lines.size();
+  if (g_activeStatusLine)
+    g_activeStatusLine->redraw();
+}
 
-  // Parse kernel pattern to get offsets
-  int patternRows = (int)WINDOW_KERNEL_PATTERN.size();
-  int patternCols = 0;
-  for (const auto &row : WINDOW_KERNEL_PATTERN) {
-    patternCols = max(patternCols, (int)row.size());
-  }
-  int centerR = patternRows / 2;
-  int centerC = patternCols / 2;
-
-  vector<int> windowPositions;
-  for (int pr = 0; pr < patternRows; pr++) {
-    for (int pc = 0; pc < (int)WINDOW_KERNEL_PATTERN[pr].size(); pc++) {
-      if (WINDOW_KERNEL_PATTERN[pr][pc] == '.') {
-        int dr = pr - centerR;
-        int dc = pc - centerC;
-        auto it = GRID.coordToIdx.find({cr + dr, cc + dc});
-        if (it != GRID.coordToIdx.end()) {
-          windowPositions.push_back(it->second);
-        }
-      }
-    }
-  }
-
-  // Full BFS within window - explore ALL states reachable by modifying window
-  // positions
+// Shared BFS core over a fixed set of window positions.
+static void exploreWindowBfs(StateType startState, const vector<int> &windowPositions, vector<StateType> &newStates,
+                             int &bestScore, StateType &bestState, long long &explored) {
   ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> localVisited;
   struct Entry {
     StateType state;
@@ -513,22 +475,15 @@ static void exploreWindow(StateType startState, int windowCenterIdx, vector<Stat
     auto [cur, curScore, depth] = q[head++];
     explored++;
 
-    // Stop expanding this branch if we've reached max depth
     if (depth >= MAX_DEPTH)
       continue;
 
     if (curScore > bestScore) {
       bestScore = curScore;
       bestState = cur;
-      if (g_activeStatusLine)
-        g_activeStatusLine->clear();
-      cout << "New best: " << bestScore << "\n";
-      printGrid(bestState);
-      if (g_activeStatusLine)
-        g_activeStatusLine->redraw();
+      redrawNewBestBlock(bestScore, bestState);
     }
 
-    // Try modifying each position in the window
     for (int pos : windowPositions) {
       if (pos >= g_numPos)
         continue;
@@ -542,8 +497,6 @@ static void exploreWindow(StateType startState, int windowCenterIdx, vector<Stat
           continue;
 
         StateType next = stateSet(cur, pos, newType);
-
-        // Only track within this window to prevent infinite loops
         if (localVisited.insert(next).second) {
           int nextScore = curScore + (newType - curType);
           q.push_back({next, nextScore, depth + 1});
@@ -552,10 +505,242 @@ static void exploreWindow(StateType startState, int windowCenterIdx, vector<Stat
       }
     }
   }
-  // localVisited is destroyed here - no global state persists
+}
+
+// ── Original center-based path/window (used for non-rectangular kernels) ──
+
+// Build zigzag path of *center indices* starting from a given corner (0..3).
+static vector<int> buildZigzagPathCenter(int corner = 0) {
+  const int R = GRID.rows, C = GRID.cols;
+  vector<vector<pair<int, int>>> diagonals;
+
+  for (int r = 0; r < R; r++) {
+    for (int c = 0; c < C; c++) {
+      if (!GRID.coordToIdx.count({r, c}))
+        continue; // center must be a real grid cell
+
+      int diag;
+      switch (corner) {
+      case 0: diag = r + c; break;                     // top-left
+      case 1: diag = r + (C - 1 - c); break;           // top-right
+      case 2: diag = (R - 1 - r) + c; break;           // bottom-left
+      case 3: diag = (R - 1 - r) + (C - 1 - c); break; // bottom-right
+      default: diag = r + c; break;
+      }
+      if (diag >= (int)diagonals.size())
+        diagonals.resize(diag + 1);
+      diagonals[diag].push_back({r, c});
+    }
+  }
+
+  vector<int> path;
+  for (int d = 0; d < (int)diagonals.size(); d++) {
+    auto &diag = diagonals[d];
+    if (d % 2 == 1)
+      reverse(diag.begin(), diag.end());
+    for (auto [r, c] : diag) {
+      path.push_back(GRID.coordToIdx.at({r, c}));
+    }
+  }
+  return path;
+}
+
+// Build snake path of *center indices*: row 0 L→R, row 1 R→L, ...
+static vector<int> buildSnakePathCenter() {
+  const int R = GRID.rows, C = GRID.cols;
+  vector<vector<int>> rowCols(R);
+  for (int r = 0; r < R; r++) {
+    for (int c = 0; c < C; c++) {
+      if (!GRID.coordToIdx.count({r, c}))
+        continue;
+      rowCols[r].push_back(c);
+    }
+    if (r % 2 == 1)
+      reverse(rowCols[r].begin(), rowCols[r].end());
+  }
+  vector<int> path;
+  for (int r = 0; r < R; r++) {
+    for (int c : rowCols[r])
+      path.push_back(GRID.coordToIdx.at({r, c}));
+  }
+  return path;
+}
+
+// Center-based window exploration: centerIdx must be a valid grid position index.
+static void exploreWindowCenter(StateType startState, int centerIdx, vector<StateType> &newStates, int &bestScore,
+                                StateType &bestState, long long &explored) {
+  auto [cr, cc] = GRID.positions[centerIdx];
+  const auto &pat = WINDOW_KERNEL_PATTERN;
+  KernelSize k = getKernelSize();
+  int centerR = k.rows / 2;
+  int centerC = k.cols / 2;
+
+  vector<int> windowPositions;
+  for (int pr = 0; pr < (int)pat.size(); pr++) {
+    for (int pc = 0; pc < (int)pat[pr].size(); pc++) {
+      if (pat[pr][pc] != '.')
+        continue;
+      int dr = pr - centerR;
+      int dc = pc - centerC;
+      auto it = GRID.coordToIdx.find({cr + dr, cc + dc});
+      if (it != GRID.coordToIdx.end())
+        windowPositions.push_back(it->second);
+    }
+  }
+
+  printGridWithWindow(windowPositions);
+  cout << "\n" << flush;
+  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored);
+}
+
+// Bounding-box fit: require the kernel's rectangular extent from (topLeftRow, topLeftCol)
+// to (topLeftRow + rows - 1, topLeftCol + cols - 1) to lie inside the grid rectangle.
+static bool shouldSkipTopLeftBoundingBox(int topLeftRow, int topLeftCol, const KernelSize &k) {
+  const int R = GRID.rows, C = GRID.cols;
+  int rLo = topLeftRow;
+  int rHi = topLeftRow + k.rows - 1;
+  int cLo = topLeftCol;
+  int cHi = topLeftCol + k.cols - 1;
+  if (rLo < 0 || cLo < 0 || rHi >= R || cHi >= C)
+    return true;
+  return false;
+}
+
+// Pattern-overlap fit: for a given top-left, a strip "overlaps the grid" iff at least one '.'
+// cell in that strip lands on a real grid cell (per createGridFromPattern()).
+// Skip this top-left if any dotted strip has zero overlap.
+static bool shouldSkipTopLeftPatternOverlap(int topLeftRow, int topLeftCol, const KernelSize &k) {
+  const auto &pat = WINDOW_KERNEL_PATTERN;
+
+  for (int kr = 0; kr < k.rows; kr++) {
+    bool rowHasDot = false;
+    bool rowOverlaps = false;
+    if (kr < (int)pat.size()) {
+      for (int pc = 0; pc < (int)pat[kr].size(); pc++) {
+        if (pat[kr][pc] != '.')
+          continue;
+        rowHasDot = true;
+        if (GRID.coordToIdx.count({topLeftRow + kr, topLeftCol + pc})) {
+          rowOverlaps = true;
+          break;
+        }
+      }
+    }
+    if (rowHasDot && !rowOverlaps)
+      return true;
+  }
+  for (int kc = 0; kc < k.cols; kc++) {
+    bool colHasDot = false;
+    bool colOverlaps = false;
+    for (int kr = 0; kr < (int)pat.size(); kr++) {
+      if (kc >= (int)pat[kr].size())
+        continue;
+      if (pat[kr][kc] != '.')
+        continue;
+      colHasDot = true;
+      if (GRID.coordToIdx.count({topLeftRow + kr, topLeftCol + kc})) {
+        colOverlaps = true;
+        break;
+      }
+    }
+    if (colHasDot && !colOverlaps)
+      return true;
+  }
+  return false;
+}
+
+// Dispatch between fit modes based on kernel index (see getWindowKernelFitMode()).
+static bool shouldSkipTopLeft(int topLeftRow, int topLeftCol, const KernelSize &k) {
+  KernelFitMode mode = getWindowKernelFitMode();
+  if (mode == KernelFitMode::BoundingBox)
+    return shouldSkipTopLeftBoundingBox(topLeftRow, topLeftCol, k);
+  return shouldSkipTopLeftPatternOverlap(topLeftRow, topLeftCol, k);
+}
+
+// Collect every (r, c) in the grid rectangle that is not skipped.
+static vector<pair<int, int>> collectValidTopLefts(const KernelSize &k) {
+  const int R = GRID.rows, C = GRID.cols;
+  vector<pair<int, int>> out;
+  for (int r = 0; r < R; r++) {
+    for (int c = 0; c < C; c++) {
+      if (shouldSkipTopLeft(r, c, k))
+        continue;
+      out.push_back({r, c});
+    }
+  }
+  return out;
+}
+
+// Order by diagonal (corner 0..3), zigzag within each diagonal; return (row, col) top-lefts.
+static vector<pair<int, int>> buildZigzagPathTopLeft(int corner = 0) {
+  const int R = GRID.rows, C = GRID.cols;
+  KernelSize k = getKernelSize();
+  vector<pair<int, int>> cells = collectValidTopLefts(k);
+
+  auto diagIndex = [&](int r, int c) {
+    switch (corner) {
+    case 0: return r + c;
+    case 1: return r + (C - 1 - c);
+    case 2: return (R - 1 - r) + c;
+    case 3: return (R - 1 - r) + (C - 1 - c);
+    default: return r + c;
+    }
+  };
+
+  sort(cells.begin(), cells.end(), [&](const pair<int, int> &a, const pair<int, int> &b) {
+    int da = diagIndex(a.first, a.second), db = diagIndex(b.first, b.second);
+    if (da != db) return da < db;
+    // Zigzag within diagonal: alternate direction by diagonal index
+    if (da % 2 == 0) return a.second < b.second;
+    return a.second > b.second;
+  });
+  return cells;
+}
+
+// Order by row; within each row, left-to-right or right-to-left (snake); return (row, col) top-lefts.
+static vector<pair<int, int>> buildSnakePathTopLeft() {
+  KernelSize k = getKernelSize();
+  vector<pair<int, int>> cells = collectValidTopLefts(k);
+
+  sort(cells.begin(), cells.end(), [](const pair<int, int> &a, const pair<int, int> &b) {
+    if (a.first != b.first) return a.first < b.first;
+    return a.second < b.second;
+  });
+
+  for (int r = 0; r < GRID.rows; r++) {
+    auto rowStart = lower_bound(cells.begin(), cells.end(), make_pair(r, 0));
+    auto rowEnd   = lower_bound(cells.begin(), cells.end(), make_pair(r + 1, 0));
+    if (r % 2 == 1 && rowStart != rowEnd)
+      reverse(rowStart, rowEnd);
+  }
+  return cells;
+}
+
+// BFS within a window. (topLeftRow, topLeftCol) is the kernel's top-left; it may be a hole.
+static void exploreWindowTopLeft(StateType startState, int topLeftRow, int topLeftCol, vector<StateType> &newStates,
+                                 int &bestScore, StateType &bestState, long long &explored) {
+  int r0 = topLeftRow, c0 = topLeftCol;
+  KernelSize k = getKernelSize();
+  const auto &pat = WINDOW_KERNEL_PATTERN;
+
+  vector<int> windowPositions;
+  for (int pr = 0; pr < k.rows; pr++) {
+    for (int pc = 0; pc < (int)pat[pr].size(); pc++) {
+      if (pat[pr][pc] != '.')
+        continue;
+      auto it = GRID.coordToIdx.find({r0 + pr, c0 + pc});
+      if (it != GRID.coordToIdx.end())
+        windowPositions.push_back(it->second);
+    }
+  }
+
+  printGridWithWindow(windowPositions);
+  cout << "\n" << flush;
+  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored);
 }
 
 static SearchResult runSlidingWindow() {
+  s_newBestBlockLines = 0;
   SearchResult result{g_baseState, 0, 0, 0};
   result.bestState = g_baseState;
   result.bestScore = 0;
@@ -585,66 +770,75 @@ static SearchResult runSlidingWindow() {
 
     // (round header intentionally not printed; keep output compact)
 
-    int corner = 1; // top-right
-    vector<int> zigzag = buildZigzagPath(corner);
+    int corner = 1; // top-right (used only when WINDOW_PATH_TYPE == 0)
+    KernelFitMode fitMode = getWindowKernelFitMode();
 
     int bestScore = currentScore;
     StateType bestState = currentState;
     long long explored = 0;
 
-    int totalWindows = (int)zigzag.size();
+    int totalWindows = 0;
     // (pass header intentionally not printed; keep output compact)
 
     auto passStart = chrono::steady_clock::now();
 
     vector<WindowStats> stats;
-    DynamicStatusLine passLine(g_originalCoutBuf == nullptr);
-    g_activeStatusLine = &passLine;
 
-    for (int windowIdx = 0; windowIdx < totalWindows; windowIdx++) {
-      vector<StateType> exploredStates;
-      long long exploredBefore = explored;
+    if (fitMode == KernelFitMode::BoundingBox) {
+      // Original behavior: choose window centers at real grid cells.
+      vector<int> windowPath = (WINDOW_PATH_TYPE == 1) ? buildSnakePathCenter() : buildZigzagPathCenter(corner);
+      totalWindows = (int)windowPath.size();
 
-      int posIdx = zigzag[windowIdx];
-      auto [cr, cc] = GRID.positions[posIdx];
+      for (int windowIdx = 0; windowIdx < totalWindows; windowIdx++) {
+        s_newBestBlockLines = 0; // new window: don't cursor-up
+        vector<StateType> exploredStates;
+        long long exploredBefore = explored;
 
-      {
-        string passName = string(1, (char)('A' + corner));
-        string win = padLeft(to_string(windowIdx + 1), 2) + "/" + padLeft(to_string(totalWindows), 2);
-        string center = "(" + padLeft(to_string(cr), 2) + "," + padLeft(to_string(cc), 2) + ")";
-        string line = "  Pass " + passName + " " + progressBar((size_t)(windowIdx + 1), (size_t)totalWindows) +
-                      " | win " + win + " | center " + center + " | best " + padLeft(to_string(bestScore), 3) +
-                      " | explored " + padLeft(formatNum(explored), 12);
-        passLine.update(line);
+        int posIdx = windowPath[windowIdx];
+        auto [cr, cc] = GRID.positions[posIdx];
+
+        auto t0 = chrono::steady_clock::now();
+        exploreWindowCenter(currentState, posIdx, exploredStates, bestScore, bestState, explored);
+        auto t1 = chrono::steady_clock::now();
+        auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
+
+        bool improved = (bestState != currentState);
+        if (improved)
+          currentState = bestState;
+
+        stats.push_back(
+            {posIdx, cr, cc, (int)exploredStates.size(), explored - exploredBefore, ms, improved, bestScore});
       }
-      auto t0 = chrono::steady_clock::now();
+    } else {
+      // New rectangular-kernel behavior: choose window top-lefts in the grid rectangle.
+      vector<pair<int, int>> windowPath =
+          (WINDOW_PATH_TYPE == 1) ? buildSnakePathTopLeft() : buildZigzagPathTopLeft(corner);
+      totalWindows = (int)windowPath.size();
 
-      exploreWindow(currentState, posIdx, exploredStates, bestScore, bestState, explored);
+      for (int windowIdx = 0; windowIdx < totalWindows; windowIdx++) {
+        s_newBestBlockLines = 0; // new window: don't cursor-up
+        vector<StateType> exploredStates;
+        long long exploredBefore = explored;
 
-      auto t1 = chrono::steady_clock::now();
-      auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
+        auto [r0, c0] = windowPath[windowIdx];
+        int posIdx = -1;
+        auto itIdx = GRID.coordToIdx.find({r0, c0});
+        if (itIdx != GRID.coordToIdx.end())
+          posIdx = itIdx->second;
 
-      bool improved = (bestState != currentState);
-      if (improved) {
-        currentState = bestState;
+        auto t0 = chrono::steady_clock::now();
+        exploreWindowTopLeft(currentState, r0, c0, exploredStates, bestScore, bestState, explored);
+        auto t1 = chrono::steady_clock::now();
+        auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
+
+        bool improved = (bestState != currentState);
+        if (improved)
+          currentState = bestState;
+
+        stats.push_back(
+            {posIdx, r0, c0, (int)exploredStates.size(), explored - exploredBefore, ms, improved, bestScore});
       }
-
-      long long deltaStates = explored - exploredBefore;
-      {
-        string passName = string(1, (char)('A' + corner));
-        string win = padLeft(to_string(windowIdx + 1), 2) + "/" + padLeft(to_string(totalWindows), 2);
-        string center = "(" + padLeft(to_string(cr), 2) + "," + padLeft(to_string(cc), 2) + ")";
-        string line = "  Pass " + passName + " " + progressBar((size_t)(windowIdx + 1), (size_t)totalWindows) +
-                      " | win " + win + " | center " + center + " | states " + padLeft(formatNum(deltaStates), 12) +
-                      " | step " + padLeft(formatTimeMs((long long)ms), 8) + " | best " +
-                      padLeft(to_string(bestScore), 3) + " | explored " + padLeft(formatNum(explored), 12);
-        passLine.update(line);
-      }
-
-      stats.push_back({posIdx, cr, cc, (int)exploredStates.size(), explored - exploredBefore, ms, improved, bestScore});
     }
-    passLine.finish();
-    g_activeStatusLine = nullptr;
 
     currentScore = bestScore;
 
@@ -671,47 +865,49 @@ static SearchResult runSlidingWindow() {
     }
     printTableBorderBottom(widths);
     cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner] << "): score " << currentScore << " ("
-         << formatTimeMs((long long)passMs) << ", " << formatNum(explored) << " states)\n\n";
+         << formatTimeMs((long long)passMs) << ", " << formatNum(explored) << " states)\n\n" << flush;
 
     result.explored += explored;
 
-    cout << "Round " << roundNum << " complete: score " << scoreAtRoundStart << " -> " << currentScore << "\n";
+    cout << "Round " << roundNum << " complete: score " << scoreAtRoundStart << " -> " << currentScore << "\n" << flush;
 
     if (currentScore <= scoreAtRoundStart) {
-      cout << "No improvement in round " << roundNum << ", stopping.\n\n";
+      cout << "No improvement in round " << roundNum << ", stopping.\n\n" << flush;
       break;
     } else {
-      cout << "Improved by " << (currentScore - scoreAtRoundStart) << ", starting another round.\n\n";
+      cout << "Improved by " << (currentScore - scoreAtRoundStart) << ", starting another round.\n\n" << flush;
     }
   }
 
   result.bestScore = currentScore;
   result.bestState = currentState;
 
-  cout << "\nFinal score after " << roundNum << " round(s): " << result.bestScore << "\n";
+  cout << "\nFinal score after " << roundNum << " round(s): " << result.bestScore << "\n" << flush;
 
-  // ── Build path reconstruction: reverse BFS ─────────────────────────────
-  printPhaseHeader("Path reconstruction (reverse BFS)");
-  printOperation("Building path from goal to start", "");
-  auto pathBuildStart = chrono::steady_clock::now();
-  StateType finalState = canonical(result.bestState);
-  vector<pair<int, int>> buildPath = buildPathFromReverseBfs(finalState);
-  auto pathBuildEnd = chrono::steady_clock::now();
-  printPhaseTiming("Path reconstruction",
-                   (long long)chrono::duration_cast<chrono::milliseconds>(pathBuildEnd - pathBuildStart).count());
-  if (buildPath.empty()) {
-    cout << "\nBuild path not found by reverse BFS.\n";
+  if (SEARCH_MODE != 3) {
+    // ── Build path reconstruction: reverse BFS ─────────────────────────────
+    printPhaseHeader("Path reconstruction (reverse BFS)");
+    printOperation("Building path from goal to start", "");
+    auto pathBuildStart = chrono::steady_clock::now();
+    StateType finalState = canonical(result.bestState);
+    vector<pair<int, int>> buildPath = buildPathFromReverseBfs(finalState);
+    auto pathBuildEnd = chrono::steady_clock::now();
+    printPhaseTiming("Path reconstruction",
+                     (long long)chrono::duration_cast<chrono::milliseconds>(pathBuildEnd - pathBuildStart).count());
+    if (buildPath.empty()) {
+      cout << "\nBuild path not found by reverse BFS.\n";
+      cout << "\nFinal score: " << result.bestScore << "\n";
+      result.uniqueStates = 0;
+      return result;
+    }
+
+    if (PATH_FROM_EMPTY)
+      printExpandedPath(buildPath, StateType(0));
+    else
+      printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState);
+
     cout << "\nFinal score: " << result.bestScore << "\n";
-    result.uniqueStates = 0;
-    return result;
   }
-
-  if (PATH_FROM_EMPTY)
-    printExpandedPath(buildPath, StateType(0));
-  else
-    printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState);
-
-  cout << "\nFinal score: " << result.bestScore << "\n";
   result.uniqueStates = 0;
 
   // Restore cout if it was redirected
@@ -806,7 +1002,7 @@ void runSingleLevel() {
   SearchResult result{g_baseState, 0, 0, 0};
   auto phaseStart = chrono::steady_clock::now();
 
-  if (SEARCH_MODE == 1) {
+  if (SEARCH_MODE == 1 || SEARCH_MODE == 3) {
     result = runSlidingWindow();
   } else if (SEARCH_MODE == 2) {
     runDFSSearch(result);
@@ -819,24 +1015,27 @@ void runSingleLevel() {
 
   auto phaseEnd = chrono::steady_clock::now();
   long long phaseMs = (long long)chrono::duration_cast<chrono::milliseconds>(phaseEnd - phaseStart).count();
-  const char *phaseName = SEARCH_MODE == 1 ? "Sliding window" : (SEARCH_MODE == 2 ? "DFS" : "BFS");
+  const char *phaseName =
+      (SEARCH_MODE == 1 || SEARCH_MODE == 3) ? "Sliding window" : (SEARCH_MODE == 2 ? "DFS" : "BFS");
   (void)phaseName;
   (void)phaseMs;
 
   cout << (SEARCH_MODE == 1   ? "\nSliding window complete.\n"
            : SEARCH_MODE == 2 ? "\nDFS complete.\n"
+           : SEARCH_MODE == 3 ? "\nSliding window only complete (no path reconstruction).\n"
                               : "\nBFS complete.\n");
   cout << "States explored : " << result.explored << "\n";
   cout << "Unique states   : " << result.uniqueStates << "\n";
   cout << "Best score      : " << result.bestScore << "\n\n";
-  cout << "Optimal layout:\n";
+  cout << "Optimal layout:\n" << flush;
   printGrid(result.bestState);
+  cout << flush;
 
   auto totalEnd = chrono::steady_clock::now();
   long long totalMs = (long long)chrono::duration_cast<chrono::milliseconds>(totalEnd - totalStart).count();
   cout << "\n";
-  cout << "Total time: " << formatTimeMs(totalMs) << "\n";
+  cout << "Total time: " << formatTimeMs(totalMs) << "\n" << flush;
 
   // Mode 0: path already printed by runBFSSearch. Mode 1: by runSlidingWindow.
-  // Mode 2: path already printed by runDFSSearch.
+  // Mode 2: path already printed by runDFSSearch. Mode 3: no path (sliding window only).
 }

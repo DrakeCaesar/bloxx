@@ -94,8 +94,8 @@ using StateType128 = uint128_simd;
 // Configuration Constants
 // ════════════════════════════════════════════════════════════════════════════
 
-// 0 = BFS, 1 = Sliding Window, 2 = DFS (depth-limited, visited set + path
-// stack)
+// 0 = BFS, 1 = Sliding Window + path reconstruction, 2 = DFS (depth-limited,
+// visited set + path stack), 3 = Sliding window only (no reverse BFS)
 [[maybe_unused]] const int SEARCH_MODE = 1;
 // DFS mode only: max depth for depth-limited DFS
 const int DFS_MAX_DEPTH = 17;
@@ -106,7 +106,7 @@ const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
 const int LEVEL_START = 3; // First level to process
-const int LEVEL_END = 5;   // Last level to process (inclusive)
+const int LEVEL_END = 3;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {
@@ -118,6 +118,8 @@ inline int &getCurrentLevel() {
 const int REVERSE_BFS_NUM_THREADS = 4;
 // Throttle for status-line updates (expand/prune/merge progress); milliseconds
 const int REVERSE_BFS_STATUS_UPDATE_MS = 1000;
+// Workers update expandedStates atomic every N states (reduces contention)
+const size_t REVERSE_BFS_EXPANDED_STATUS_INTERVAL = 10'000;
 
 // Reverse BFS pruning: only run when parent map size exceeds this
 const size_t REVERSE_BFS_PRUNE_THRESHOLD = 1'000'000;
@@ -183,7 +185,11 @@ constexpr bool BACKWARD_TRANSITIONS_EMPTY[6][6] = {
 // Sliding window parameters
 const int MAX_DEPTH = 10; // Maximum BFS depth per window
 
-const int KERNEL_INDEX = 2; // Select which kernel to use
+const int KERNEL_INDEX = 3; // Select which kernel to use
+
+// Window traversal order: 0 = zigzag (diagonals, corner-based), 1 = snake
+// (row-wise: left→right, then one down, right→left, one down, etc.)
+const int WINDOW_PATH_TYPE = 1;
 
 // Kernel patterns: '.' = include in window, ' ' = exclude
 // Pattern is centered on the window position
@@ -196,18 +202,36 @@ const vector<vector<string>> KERNEL_PATTERNS = {
     {"...", "...", "..."},
     // 2: Diamond / plus shape (13 positions)
     {"  .  ", " ... ", ".....", " ... ", "  .  "},
-    // 3: 5x5 square (25 positions)
+    // 3: 4x5 rectangle (20 positions)
+    {".....", ".....", ".....", "....."},
+
+    // 4: 5x5 square (25 positions)
     {".....", ".....", ".....", ".....", "....."},
-    // 4: Plus shape (9 positions)
-    {"  .  ", "  .  ", ".....", "  .  ", "  .  "},
-    // 5: L-shape (5 positions)
-    {"...", ". ", ". "},
 };
 inline const vector<string> &getWindowKernelPattern() {
   static const vector<string> pattern = KERNEL_PATTERNS[KERNEL_INDEX];
   return pattern;
 }
 #define WINDOW_KERNEL_PATTERN getWindowKernelPattern()
+
+// How to decide if a kernel placement at (r,c) is valid:
+// - BoundingBox: use only the kernel's rectangular extent vs. GRID.rows/cols
+// - PatternOverlap: use per-row / per-column '.' overlap against actual grid cells
+enum class KernelFitMode { BoundingBox, PatternOverlap };
+
+inline KernelFitMode getWindowKernelFitMode() {
+  switch (KERNEL_INDEX) {
+  case 0: // cross
+  case 2: // diamond / plus
+    return KernelFitMode::BoundingBox;
+  case 1: // 3x3 square
+  case 3: // 4x5 rectangle
+  case 4: // 5x5 square
+    return KernelFitMode::PatternOverlap;
+  default:
+    return KernelFitMode::PatternOverlap;
+  }
+}
 
 // Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
 // 128-bit. For multi-level we use 128-bit for all levels. For single-level
@@ -230,6 +254,12 @@ const string BLACK_TEXT = "\033[30m"; // Black text for number
 const string EMPTY_BG = "\033[100m";  // Grey background - empty/unplaced position
 const string EMPTY_FG = "\033[90m";   // Grey foreground - empty position (grey bg + grey fg)
 
+// Sliding-window grid footprint: checkerboard of two backgrounds (change to customize)
+const string GRID_BG[2] = {
+    "\033[100m", // 0 light (e.g. dark grey)
+    "\033[40m",  // 1 dark (e.g. black)
+};
+
 // ANSI foreground colors for half-block separators (3x codes)
 // Index 0 = empty, 1-5 = tower types
 const string FG_COLORS[] = {
@@ -239,4 +269,19 @@ const string FG_COLORS[] = {
     "\033[32m", // Green foreground  - type 3
     "\033[33m", // Yellow foreground - type 4
     "\033[37m"  // White foreground  - type 5
+};
+
+// Sliding-window box: 8 characters (change these to customize)
+// [0] top-left   [1] top-right   [2] bottom-left   [3] bottom-right
+// [4] upper (top edge)   [5] lower (bottom edge)
+// [6] right (right edge)   [7] left (left edge)
+const string BLOCK_BOX[8] = {
+    "\U0001FB7D", // 0 top-left   (left+upper  U+1FB7D)
+    "\U0001FB7E", // 1 top-right  (right+upper U+1FB7E)
+    "\U0001FB7C", // 2 bottom-left  (left+lower  U+1FB7C)
+    "\U0001FB7F", // 3 bottom-right (right+lower U+1FB7F)
+    "\U00002594", // 4 upper
+    "\U00002581", // 5 lower
+    "\U00002595", // 6 right
+    "\U0000258F", // 7 left
 };

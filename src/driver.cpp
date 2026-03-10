@@ -18,7 +18,6 @@ int main() {
 #ifdef _WIN32
   // Set console to UTF-8 mode for proper Unicode display on Windows
   SetConsoleOutputCP(CP_UTF8);
-  setvbuf(stdout, nullptr, _IOFBF, 1000);
 #endif
 
   // Process configured level range and all unlocked tower types

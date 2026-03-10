@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <iostream>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -318,6 +319,134 @@ inline void printGrid(StateType s) {
       cout << " \n";
     }
   }
+}
+
+// Same as printGrid but returns one string per row (for in-place redraw).
+inline std::vector<std::string> gridToLines(StateType s) {
+  std::vector<std::string> lines;
+  lines.reserve(GRID.rows);
+  for (int r = 0; r < GRID.rows; r++) {
+    std::ostringstream row;
+    pair<int, int> firstCoord = {r, 0};
+    if (GRID.coordToIdx.count(firstCoord)) {
+      int firstT = stateGet(s, GRID.coordToIdx[firstCoord]);
+      row << FG_COLORS[firstT] << "▐" << RESET;
+    } else {
+      row << " ";
+    }
+    for (int c = 0; c < GRID.cols; c++) {
+      pair<int, int> coord = {r, c};
+      if (GRID.coordToIdx.count(coord)) {
+        int t = stateGet(s, GRID.coordToIdx[coord]);
+        row << COLORS[t] << BLACK_TEXT << t << RESET;
+      } else {
+        row << " ";
+      }
+      if (c < GRID.cols - 1) {
+        pair<int, int> nextCoord = {r, c + 1};
+        bool currExists = GRID.coordToIdx.count(coord);
+        bool nextExists = GRID.coordToIdx.count(nextCoord);
+        if (currExists && nextExists) {
+          int t = stateGet(s, GRID.coordToIdx[coord]);
+          int nextT = stateGet(s, GRID.coordToIdx[nextCoord]);
+          row << FG_COLORS[nextT] << COLORS[t] << "▐" << RESET;
+        } else if (currExists && !nextExists) {
+          int t = stateGet(s, GRID.coordToIdx[coord]);
+          row << FG_COLORS[t] << "▌" << RESET;
+        } else if (!currExists && nextExists) {
+          int nextT = stateGet(s, GRID.coordToIdx[nextCoord]);
+          row << FG_COLORS[nextT] << "▐" << RESET;
+        } else {
+          row << " ";
+        }
+      }
+    }
+    pair<int, int> lastCoord = {r, GRID.cols - 1};
+    if (GRID.coordToIdx.count(lastCoord)) {
+      int lastT = stateGet(s, GRID.coordToIdx[lastCoord]);
+      row << FG_COLORS[lastT] << "▌" << RESET;
+    } else {
+      row << " ";
+    }
+    lines.push_back(row.str());
+  }
+  return lines;
+}
+
+// Grid footprint in background colour (each tile = 2 spaces), window as box-drawing
+// rectangle on top. Only existing grid cells get the background; window is bounding box.
+inline void printGridWithWindow(const std::vector<int> &windowPositionIndices) {
+  int R = GRID.rows, C = GRID.cols;
+  int W = 2 * C; // columns in output (2 spaces per tile)
+  int minR = R, maxR = -1, minC = C, maxC = -1;
+  for (int idx : windowPositionIndices) {
+    if (idx >= 0 && idx < GRID.numPositions()) {
+      int r = GRID.positions[idx].first, c = GRID.positions[idx].second;
+      if (r < minR) minR = r;
+      if (r > maxR) maxR = r;
+      if (c < minC) minC = c;
+      if (c > maxC) maxC = c;
+    }
+  }
+  if (minR > maxR) { minR = maxR = 0; minC = maxC = 0; }
+
+  // Buffer: R rows x W cols; each cell is one output unit (space or box char)
+  std::vector<std::vector<std::string>> buf(R, std::vector<std::string>(W, ""));
+  auto setBox = [&buf, R, W](int y, int x, const char *ch) {
+    if (y >= 0 && y < R && x >= 0 && x < W)
+      buf[y][x] = ch;
+  };
+
+  // Grid footprint: mark each existing (r,c) so we draw 2 spaces with bg
+  std::vector<std::vector<bool>> gridCell(R, std::vector<bool>(W, false));
+  for (int r = 0; r < R; r++) {
+    for (int c = 0; c < C; c++) {
+      if (GRID.coordToIdx.count(std::make_pair(r, c))) {
+        gridCell[r][2 * c] = true;
+        gridCell[r][2 * c + 1] = true;
+      }
+    }
+  }
+
+  // Window bounding box: BLOCK_BOX[0..7] — corners + upper, lower, right, left
+  int x0 = 2 * minC, x1 = 2 * maxC + 1;
+  setBox(minR, x0, BLOCK_BOX[0].c_str());   // top-left
+  setBox(minR, x1, BLOCK_BOX[1].c_str());   // top-right
+  setBox(maxR, x0, BLOCK_BOX[2].c_str());   // bottom-left
+  setBox(maxR, x1, BLOCK_BOX[3].c_str());   // bottom-right
+  for (int x = x0 + 1; x < x1; x++) {
+    setBox(minR, x, BLOCK_BOX[4].c_str());  // upper (top edge)
+    setBox(maxR, x, BLOCK_BOX[5].c_str());  // lower (bottom edge)
+  }
+  for (int r = minR + 1; r < maxR; r++) {
+    setBox(r, x0, BLOCK_BOX[7].c_str());   // left
+    setBox(r, x1, BLOCK_BOX[6].c_str());   // right
+  }
+
+  // Grid = checkerboard of two backgrounds; box = foreground on top
+  std::cout << "\n";
+  for (int r = 0; r < R; r++) {
+    for (int x = 0; x < W; x++) {
+      const std::string &cell = buf[r][x];
+      if (gridCell[r][x]) {
+        int tileCol = x / 2;
+        const std::string &bg = GRID_BG[(r + tileCol) % 2];
+        std::cout << bg;
+        if (!cell.empty())
+          std::cout << cell;  // box char in foreground
+        else
+          std::cout << " ";   // grid tile, no box
+        std::cout << RESET;
+      } else {
+        if (!cell.empty())
+          std::cout << cell;
+        else
+          std::cout << " ";
+      }
+    }
+    std::cout << "\n";
+  }
+  std::cout << std::flush;
 }
 
 // printGrid with placed mask: bit i=1 means position i has been explicitly
