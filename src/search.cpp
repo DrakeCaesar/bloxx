@@ -437,6 +437,30 @@ static KernelSize getKernelSize() {
   return k;
 }
 
+// Rotate the active kernel pattern 90 degrees clockwise. Computed once and cached.
+static const vector<string> &getWindowKernelPatternRotated90() {
+  static vector<string> rotated;
+  if (!rotated.empty())
+    return rotated;
+
+  const auto &pat = WINDOW_KERNEL_PATTERN;
+  int R = (int)pat.size();
+  int C = 0;
+  for (const auto &row : pat)
+    C = max(C, (int)row.size());
+
+  rotated.assign(C, string(R, ' '));
+  for (int r = 0; r < R; r++) {
+    for (int c = 0; c < (int)pat[r].size(); c++) {
+      char ch = pat[r][c];
+      int nr = c;
+      int nc = R - 1 - r;
+      rotated[nr][nc] = ch;
+    }
+  }
+  return rotated;
+}
+
 // Shared helper: redraw the in-place "New best" block (score + grid).
 static void redrawNewBestBlock(int bestScore, StateType bestState) {
   if (g_activeStatusLine)
@@ -521,11 +545,21 @@ static vector<int> buildZigzagPathCenter(int corner = 0) {
 
       int diag;
       switch (corner) {
-      case 0: diag = r + c; break;                     // top-left
-      case 1: diag = r + (C - 1 - c); break;           // top-right
-      case 2: diag = (R - 1 - r) + c; break;           // bottom-left
-      case 3: diag = (R - 1 - r) + (C - 1 - c); break; // bottom-right
-      default: diag = r + c; break;
+      case 0:
+        diag = r + c;
+        break; // top-left
+      case 1:
+        diag = r + (C - 1 - c);
+        break; // top-right
+      case 2:
+        diag = (R - 1 - r) + c;
+        break; // bottom-left
+      case 3:
+        diag = (R - 1 - r) + (C - 1 - c);
+        break; // bottom-right
+      default:
+        diag = r + c;
+        break;
       }
       if (diag >= (int)diagonals.size())
         diagonals.resize(diag + 1);
@@ -609,9 +643,8 @@ static bool shouldSkipTopLeftBoundingBox(int topLeftRow, int topLeftCol, const K
 // Pattern-overlap fit: for a given top-left, a strip "overlaps the grid" iff at least one '.'
 // cell in that strip lands on a real grid cell (per createGridFromPattern()).
 // Skip this top-left if any dotted strip has zero overlap.
-static bool shouldSkipTopLeftPatternOverlap(int topLeftRow, int topLeftCol, const KernelSize &k) {
-  const auto &pat = WINDOW_KERNEL_PATTERN;
-
+static bool shouldSkipTopLeftPatternOverlapWithPattern(int topLeftRow, int topLeftCol, const KernelSize &k,
+                                                       const vector<string> &pat) {
   for (int kr = 0; kr < k.rows; kr++) {
     bool rowHasDot = false;
     bool rowOverlaps = false;
@@ -649,6 +682,11 @@ static bool shouldSkipTopLeftPatternOverlap(int topLeftRow, int topLeftCol, cons
   return false;
 }
 
+static bool shouldSkipTopLeftPatternOverlap(int topLeftRow, int topLeftCol, const KernelSize &k) {
+  const auto &pat = WINDOW_KERNEL_PATTERN;
+  return shouldSkipTopLeftPatternOverlapWithPattern(topLeftRow, topLeftCol, k, pat);
+}
+
 // Dispatch between fit modes based on kernel index (see getWindowKernelFitMode()).
 static bool shouldSkipTopLeft(int topLeftRow, int topLeftCol, const KernelSize &k) {
   KernelFitMode mode = getWindowKernelFitMode();
@@ -657,13 +695,27 @@ static bool shouldSkipTopLeft(int topLeftRow, int topLeftCol, const KernelSize &
   return shouldSkipTopLeftPatternOverlap(topLeftRow, topLeftCol, k);
 }
 
-// Collect every (r, c) in the grid rectangle that is not skipped.
+// Collect every (r, c) in the grid rectangle that is not skipped for the active kernel.
 static vector<pair<int, int>> collectValidTopLefts(const KernelSize &k) {
   const int R = GRID.rows, C = GRID.cols;
   vector<pair<int, int>> out;
   for (int r = 0; r < R; r++) {
     for (int c = 0; c < C; c++) {
       if (shouldSkipTopLeft(r, c, k))
+        continue;
+      out.push_back({r, c});
+    }
+  }
+  return out;
+}
+
+// Collect every (r, c) in the grid rectangle that is not skipped for a specific pattern (pattern-overlap mode).
+static vector<pair<int, int>> collectValidTopLeftsForPattern(const KernelSize &k, const vector<string> &pat) {
+  const int R = GRID.rows, C = GRID.cols;
+  vector<pair<int, int>> out;
+  for (int r = 0; r < R; r++) {
+    for (int c = 0; c < C; c++) {
+      if (shouldSkipTopLeftPatternOverlapWithPattern(r, c, k, pat))
         continue;
       out.push_back({r, c});
     }
@@ -679,19 +731,61 @@ static vector<pair<int, int>> buildZigzagPathTopLeft(int corner = 0) {
 
   auto diagIndex = [&](int r, int c) {
     switch (corner) {
-    case 0: return r + c;
-    case 1: return r + (C - 1 - c);
-    case 2: return (R - 1 - r) + c;
-    case 3: return (R - 1 - r) + (C - 1 - c);
-    default: return r + c;
+    case 0:
+      return r + c;
+    case 1:
+      return r + (C - 1 - c);
+    case 2:
+      return (R - 1 - r) + c;
+    case 3:
+      return (R - 1 - r) + (C - 1 - c);
+    default:
+      return r + c;
     }
   };
 
   sort(cells.begin(), cells.end(), [&](const pair<int, int> &a, const pair<int, int> &b) {
     int da = diagIndex(a.first, a.second), db = diagIndex(b.first, b.second);
-    if (da != db) return da < db;
+    if (da != db)
+      return da < db;
     // Zigzag within diagonal: alternate direction by diagonal index
-    if (da % 2 == 0) return a.second < b.second;
+    if (da % 2 == 0)
+      return a.second < b.second;
+    return a.second > b.second;
+  });
+  return cells;
+}
+
+static vector<pair<int, int>> buildZigzagPathTopLeftForPattern(const vector<string> &pat, int corner = 0) {
+  const int R = GRID.rows, C = GRID.cols;
+  KernelSize k;
+  k.rows = (int)pat.size();
+  k.cols = 0;
+  for (const auto &row : pat)
+    k.cols = max(k.cols, (int)row.size());
+  vector<pair<int, int>> cells = collectValidTopLeftsForPattern(k, pat);
+
+  auto diagIndex = [&](int r, int c) {
+    switch (corner) {
+    case 0:
+      return r + c;
+    case 1:
+      return r + (C - 1 - c);
+    case 2:
+      return (R - 1 - r) + c;
+    case 3:
+      return (R - 1 - r) + (C - 1 - c);
+    default:
+      return r + c;
+    }
+  };
+
+  sort(cells.begin(), cells.end(), [&](const pair<int, int> &a, const pair<int, int> &b) {
+    int da = diagIndex(a.first, a.second), db = diagIndex(b.first, b.second);
+    if (da != db)
+      return da < db;
+    if (da % 2 == 0)
+      return a.second < b.second;
     return a.second > b.second;
   });
   return cells;
@@ -703,13 +797,37 @@ static vector<pair<int, int>> buildSnakePathTopLeft() {
   vector<pair<int, int>> cells = collectValidTopLefts(k);
 
   sort(cells.begin(), cells.end(), [](const pair<int, int> &a, const pair<int, int> &b) {
-    if (a.first != b.first) return a.first < b.first;
+    if (a.first != b.first)
+      return a.first < b.first;
     return a.second < b.second;
   });
 
   for (int r = 0; r < GRID.rows; r++) {
     auto rowStart = lower_bound(cells.begin(), cells.end(), make_pair(r, 0));
-    auto rowEnd   = lower_bound(cells.begin(), cells.end(), make_pair(r + 1, 0));
+    auto rowEnd = lower_bound(cells.begin(), cells.end(), make_pair(r + 1, 0));
+    if (r % 2 == 1 && rowStart != rowEnd)
+      reverse(rowStart, rowEnd);
+  }
+  return cells;
+}
+
+static vector<pair<int, int>> buildSnakePathTopLeftForPattern(const vector<string> &pat) {
+  KernelSize k;
+  k.rows = (int)pat.size();
+  k.cols = 0;
+  for (const auto &row : pat)
+    k.cols = max(k.cols, (int)row.size());
+  vector<pair<int, int>> cells = collectValidTopLeftsForPattern(k, pat);
+
+  sort(cells.begin(), cells.end(), [](const pair<int, int> &a, const pair<int, int> &b) {
+    if (a.first != b.first)
+      return a.first < b.first;
+    return a.second < b.second;
+  });
+
+  for (int r = 0; r < GRID.rows; r++) {
+    auto rowStart = lower_bound(cells.begin(), cells.end(), make_pair(r, 0));
+    auto rowEnd = lower_bound(cells.begin(), cells.end(), make_pair(r + 1, 0));
     if (r % 2 == 1 && rowStart != rowEnd)
       reverse(rowStart, rowEnd);
   }
@@ -736,6 +854,36 @@ static void exploreWindowTopLeft(StateType startState, int topLeftRow, int topLe
 
   printGridWithWindow(windowPositions);
   cout << "\n" << flush;
+
+  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored);
+}
+
+// Top-left exploration with the kernel rotated 90 degrees clockwise.
+static void exploreWindowTopLeftRotated(StateType startState, int topLeftRow, int topLeftCol,
+                                        vector<StateType> &newStates, int &bestScore, StateType &bestState,
+                                        long long &explored) {
+  int r0 = topLeftRow, c0 = topLeftCol;
+  const auto &pat = getWindowKernelPatternRotated90();
+  KernelSize k;
+  k.rows = (int)pat.size();
+  k.cols = 0;
+  for (const auto &row : pat)
+    k.cols = max(k.cols, (int)row.size());
+
+  vector<int> windowPositions;
+  for (int pr = 0; pr < k.rows; pr++) {
+    for (int pc = 0; pc < (int)pat[pr].size(); pc++) {
+      if (pat[pr][pc] != '.')
+        continue;
+      auto it = GRID.coordToIdx.find({r0 + pr, c0 + pc});
+      if (it != GRID.coordToIdx.end())
+        windowPositions.push_back(it->second);
+    }
+  }
+
+  printGridWithWindow(windowPositions);
+  cout << "\n" << flush;
+
   exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored);
 }
 
@@ -810,17 +958,24 @@ static SearchResult runSlidingWindow() {
             {posIdx, cr, cc, (int)exploredStates.size(), explored - exploredBefore, ms, improved, bestScore});
       }
     } else {
-      // New rectangular-kernel behavior: choose window top-lefts in the grid rectangle.
-      vector<pair<int, int>> windowPath =
-          (WINDOW_PATH_TYPE == 1) ? buildSnakePathTopLeft() : buildZigzagPathTopLeft(corner);
-      totalWindows = (int)windowPath.size();
+      // Rectangular-kernel behavior: choose window top-lefts in the grid rectangle,
+      // and run two passes: original kernel, then the kernel rotated 90 degrees.
+      const auto &pat0 = WINDOW_KERNEL_PATTERN;
+      const auto &pat1 = getWindowKernelPatternRotated90();
 
-      for (int windowIdx = 0; windowIdx < totalWindows; windowIdx++) {
+      vector<pair<int, int>> windowPath0 = (WINDOW_PATH_TYPE == 1) ? buildSnakePathTopLeftForPattern(pat0)
+                                                                   : buildZigzagPathTopLeftForPattern(pat0, corner);
+      vector<pair<int, int>> windowPath1 = (WINDOW_PATH_TYPE == 1) ? buildSnakePathTopLeftForPattern(pat1)
+                                                                   : buildZigzagPathTopLeftForPattern(pat1, corner);
+
+      totalWindows = (int)windowPath0.size() + (int)windowPath1.size();
+
+      // Pass 0: original orientation
+      for (const auto &[r0, c0] : windowPath0) {
         s_newBestBlockLines = 0; // new window: don't cursor-up
         vector<StateType> exploredStates;
         long long exploredBefore = explored;
 
-        auto [r0, c0] = windowPath[windowIdx];
         int posIdx = -1;
         auto itIdx = GRID.coordToIdx.find({r0, c0});
         if (itIdx != GRID.coordToIdx.end())
@@ -828,6 +983,30 @@ static SearchResult runSlidingWindow() {
 
         auto t0 = chrono::steady_clock::now();
         exploreWindowTopLeft(currentState, r0, c0, exploredStates, bestScore, bestState, explored);
+        auto t1 = chrono::steady_clock::now();
+        auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
+
+        bool improved = (bestState != currentState);
+        if (improved)
+          currentState = bestState;
+
+        stats.push_back(
+            {posIdx, r0, c0, (int)exploredStates.size(), explored - exploredBefore, ms, improved, bestScore});
+      }
+
+      // Pass 1: rotated 90 degrees
+      for (const auto &[r0, c0] : windowPath1) {
+        s_newBestBlockLines = 0; // new window: don't cursor-up
+        vector<StateType> exploredStates;
+        long long exploredBefore = explored;
+
+        int posIdx = -1;
+        auto itIdx = GRID.coordToIdx.find({r0, c0});
+        if (itIdx != GRID.coordToIdx.end())
+          posIdx = itIdx->second;
+
+        auto t0 = chrono::steady_clock::now();
+        exploreWindowTopLeftRotated(currentState, r0, c0, exploredStates, bestScore, bestState, explored);
         auto t1 = chrono::steady_clock::now();
         auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
 
@@ -865,7 +1044,8 @@ static SearchResult runSlidingWindow() {
     }
     printTableBorderBottom(widths);
     cout << "Pass " << (char)('A' + corner) << " (" << cornerNames[corner] << "): score " << currentScore << " ("
-         << formatTimeMs((long long)passMs) << ", " << formatNum(explored) << " states)\n\n" << flush;
+         << formatTimeMs((long long)passMs) << ", " << formatNum(explored) << " states)\n\n"
+         << flush;
 
     result.explored += explored;
 
