@@ -373,6 +373,41 @@ inline void printBuildPath(StateType bestState,
     printExpandedPath(expandPathForEmptyBoard(steps), g_baseState);
 }
 
+// Return path (steps) from start to target using the BFS visited set. Empty if target not in visited.
+template <typename S>
+static vector<pair<int, int>> getPathFromVisited(
+    StateType target,
+    const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &visited) {
+  vector<pair<int, int>> steps;
+  StateType cur = target;
+  while (true) {
+    auto it = visited.find(toStorageKey<S>(cur));
+    if (it == visited.end())
+      return {};
+    auto tr = storageTrans<S>(*it);
+    if (tr.getPos() == -1)
+      break;
+    int childPos = tr.getPos();
+    int newType = stateGet(cur, childPos);
+    StateType parent = canonical(stateSet(cur, childPos, tr.getType()));
+    int posInParent = -1;
+    for (int p = 0; p < g_numPos; p++) {
+      if (stateGet(parent, p) == newType)
+        continue;
+      if (canonical(stateSet(parent, p, newType)) == cur) {
+        posInParent = p;
+        break;
+      }
+    }
+    if (posInParent < 0)
+      posInParent = childPos;
+    steps.push_back({posInParent, newType});
+    cur = parent;
+  }
+  reverse(steps.begin(), steps.end());
+  return steps;
+}
+
 void printBuildPathSteps(const vector<pair<int, int>> &buildPath) {
   if (PATH_FROM_EMPTY)
     printExpandedPath(buildPath, StateType(0));
@@ -1390,6 +1425,54 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
   }
 
   result.uniqueStates = visited.size();
+
+  // Collect all states at best score and write them to best_states file (with paths from BFS).
+  {
+    ankerl::unordered_dense::set<StateType, StateHash, StateEqual> bestCanonicalStates;
+    for (const auto &key : visited) {
+      StateType s = storageToState<S>(key);
+      if (scoreGrid(s) == result.bestScore)
+        bestCanonicalStates.insert(canonical(s));
+    }
+    string prefix = "";
+    if (std::filesystem::current_path().filename() == "build")
+      prefix = "../";
+    string bestStatesFilename =
+        prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(UNLOCKED_TYPE_END) + "_best_states.txt";
+    StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+    vector<BestStateEntry> toWrite;
+    toWrite.reserve(bestCanonicalStates.size());
+    for (StateType s : bestCanonicalStates) {
+      vector<pair<int, int>> steps = getPathFromVisited<S>(s, visited);
+      BestStateEntry e;
+      e.stateStr = stateToLine(s);
+      e.pathLen = (int)steps.size();
+      vector<StateType> seq = stateSequenceFromSteps(pathStartState, steps);
+      e.stateSequence.reserve(seq.size());
+      for (StateType st : seq)
+        e.stateSequence.push_back(stateToLine(st));
+      toWrite.push_back(std::move(e));
+    }
+    sort(toWrite.begin(), toWrite.end(),
+         [](const BestStateEntry &a, const BestStateEntry &b) { return a.stateStr < b.stateStr; });
+    if ((int)toWrite.size() > SLIDING_WINDOW_MAX_BEST_STATES)
+      toWrite.resize(SLIDING_WINDOW_MAX_BEST_STATES);
+    ofstream bestStatesFile(bestStatesFilename);
+    if (!bestStatesFile) {
+      cerr << "Failed to open best-states file: " << bestStatesFilename << "\n";
+    } else {
+      bestStatesFile << "score " << result.bestScore << "\n";
+      bestStatesFile << "count " << toWrite.size() << "\n";
+      for (const BestStateEntry &e : toWrite) {
+        bestStatesFile << e.stateStr << " " << e.pathLen;
+        for (const string &st : e.stateSequence)
+          bestStatesFile << " " << st;
+        bestStatesFile << "\n";
+      }
+      bestStatesFile.close();
+      cout << "Wrote " << toWrite.size() << " best-score state(s) to " << bestStatesFilename << "\n" << flush;
+    }
+  }
 
   if (g_baselineFile && g_baselineFile->is_open()) {
     g_originalCoutBuf = cout.rdbuf();
