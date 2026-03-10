@@ -30,7 +30,7 @@ static void trimWorkingSetIfHighMemory() {
   mem.dwLength = sizeof(mem);
   if (!GlobalMemoryStatusEx(&mem))
     return;
-  if (mem.dwMemoryLoad > 80)
+  if (mem.dwMemoryLoad > 95)
     SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
 }
 #endif
@@ -41,9 +41,8 @@ template <typename S> struct ReverseExpansion {
 };
 
 template <typename ParentSet, typename Queue>
-static void pruneSideImpl(ParentSet &parentMap, Queue &queue, bool keepLowest,
-                          DynamicStatusLine *opLine = nullptr, std::mutex *coutMutex = nullptr,
-                          const std::string &label = "", std::string *lastOp = nullptr,
+static void pruneSideImpl(ParentSet &parentMap, Queue &queue, bool keepLowest, DynamicStatusLine *opLine = nullptr,
+                          std::mutex *coutMutex = nullptr, const std::string &label = "", std::string *lastOp = nullptr,
                           std::vector<std::string> *opLog = nullptr) {
   using S = typename ParentSet::value_type;
   if (parentMap.size() <= REVERSE_BFS_PRUNE_THRESHOLD || queue.empty())
@@ -361,9 +360,8 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
           recordIfNewOp("expanding");
           std::string layerStr = padLeft(std::to_string((unsigned)depth), 2);
           std::string label = "L" + layerStr + ": expanding";
-          opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) +
-                        progressBar(cur, (std::max<size_t>)(1, layerCount)) + " | elapsed " +
-                        formatTimeMs((long long)ms));
+          opLine.update(padRight(label, REVERSE_BFS_LABEL_WIDTH) + progressBar(cur, (std::max<size_t>)(1, layerCount)) +
+                        " | elapsed " + formatTimeMs((long long)ms));
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(statusPollMs));
       }
@@ -764,24 +762,18 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
                    "path."
                 << std::endl;
       if (minTowersLeft <= g_numPos) {
-        std::cout << "[Main] Closest reverse states have " << minTowersLeft
-                  << " towers; path start requires " << baseTowers
-                  << ". Remaining map tower range: " << minTowersLeft << "-"
-                  << maxTowersLeft << "."
+        std::cout << "[Main] Closest reverse states have " << minTowersLeft << " towers; path start requires "
+                  << baseTowers << ". Remaining map tower range: " << minTowersLeft << "-" << maxTowersLeft << "."
                   << std::endl;
         if (lowestCount > 0) {
           size_t shown = lowestStates.size();
           for (size_t i = 0; i < shown; i++) {
-            std::cout << "[Main] Lowest-tower state #" << (i + 1) << " ("
-                      << minTowersLeft << " towers):"
-                      << std::endl;
+            std::cout << "[Main] Lowest-tower state #" << (i + 1) << " (" << minTowersLeft << " towers):" << std::endl;
             printGrid(lowestStates[i]);
           }
           if (lowestCount > shown) {
-            std::cout << "[Main] ... plus "
-                      << formatNum((long long)(lowestCount - shown))
-                      << " more lowest-tower states not shown."
-                      << std::endl;
+            std::cout << "[Main] ... plus " << formatNum((long long)(lowestCount - shown))
+                      << " more lowest-tower states not shown." << std::endl;
           }
         }
       }
@@ -792,6 +784,10 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
       auto tr = storageTrans<S>(*parentReverse.find(toStorageKey<S>(cur)));
       steps.push_back({tr.getPos(), tr.getType()});
       cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
+    }
+    if (g_originalCoutBuf) {
+      std::cout.rdbuf(g_originalCoutBuf);
+      g_originalCoutBuf = nullptr;
     }
     return steps;
   }
@@ -873,6 +869,10 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
   }
 
   steps.insert(steps.begin(), stepsForward.begin(), stepsForward.end());
+  if (g_originalCoutBuf) {
+    std::cout.rdbuf(g_originalCoutBuf);
+    g_originalCoutBuf = nullptr;
+  }
   return steps;
 }
 

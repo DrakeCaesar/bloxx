@@ -418,8 +418,17 @@ inline ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> 
 }
 
 // ── Best-states file (read/write) ─────────────────────────────────────────────
+// Line format: <state_digits> <path_length> <state_0> <state_1> ... <state_n>
+// (path_length = number of moves; state_0..state_n = full sequence from start to goal.)
+// Legacy: line may be state_digits only (no path); we then run reverse BFS to fill path.
 
-// Serialize one canonical state to a single line of g_numPos digits '0'-'5'.
+struct BestStateEntry {
+  string stateStr;             // g_numPos digits
+  int pathLen = -1;            // -1 = missing
+  vector<string> stateSequence; // pathLen+1 state strings when pathLen >= 0
+};
+
+// Serialize one canonical state to a string of g_numPos digits '0'-'5'.
 static string stateToLine(StateType s) {
   string line;
   line.reserve((size_t)g_numPos);
@@ -428,8 +437,34 @@ static string stateToLine(StateType s) {
   return line;
 }
 
-// Read best_states file if it exists. Returns (score, state lines). Invalid or missing file -> (-1, {}).
-static pair<int, vector<string>> readBestStatesFile(const string &filename) {
+// Parse first g_numPos digits of s as canonical state.
+static StateType lineToState(const string &s) {
+  StateType st = 0;
+  for (int i = 0; i < g_numPos && i < (int)s.size(); i++) {
+    int t = s[i] - '0';
+    if (t < 0 || t > 5)
+      return 0;
+    st = stateSet(st, i, t);
+  }
+  return canonical(st);
+}
+
+// From startState apply each step; return sequence of states (startState, ..., endState).
+static vector<StateType> stateSequenceFromSteps(StateType startState,
+                                                const vector<pair<int, int>> &steps) {
+  vector<StateType> seq;
+  seq.reserve(steps.size() + 1);
+  seq.push_back(startState);
+  StateType cur = startState;
+  for (const auto &[pos, newType] : steps) {
+    cur = canonical(stateSet(cur, pos, newType));
+    seq.push_back(cur);
+  }
+  return seq;
+}
+
+// Read best_states file. Returns (score, entries). Invalid/missing -> (-1, {}).
+static pair<int, vector<BestStateEntry>> readBestStatesFile(const string &filename) {
   ifstream f(filename);
   if (!f)
     return {-1, {}};
@@ -445,17 +480,58 @@ static pair<int, vector<string>> readBestStatesFile(const string &filename) {
   int count = 0;
   if (sscanf(countLine.c_str(), "count %d", &count) != 1 || count < 0)
     return {-1, {}};
-  vector<string> lines;
-  lines.reserve((size_t)min(count, 10000));
+  vector<BestStateEntry> entries;
+  entries.reserve((size_t)min(count, 10000));
   for (int i = 0; i < count; i++) {
     string line;
     if (!getline(f, line))
       return {-1, {}};
-    if ((int)line.size() != g_numPos)
+    BestStateEntry e;
+    size_t pos = 0;
+    while (pos < line.size() && line[pos] == ' ')
+      pos++;
+    if (pos >= line.size() || (int)line.size() - (int)pos < g_numPos)
       return {-1, {}};
-    lines.push_back(line);
+    e.stateStr = line.substr(pos, (size_t)g_numPos);
+    pos += (size_t)g_numPos;
+    for (int j = 0; j < g_numPos && j < (int)e.stateStr.size(); j++)
+      if (e.stateStr[j] < '0' || e.stateStr[j] > '5')
+        return {-1, {}};
+    while (pos < line.size() && line[pos] == ' ')
+      pos++;
+    if (pos >= line.size()) {
+      e.pathLen = -1;
+      entries.push_back(std::move(e));
+      continue;
+    }
+    // Parse path_length and state sequence
+    size_t tokStart = pos;
+    while (pos < line.size() && line[pos] != ' ')
+      pos++;
+    string pathLenStr = line.substr(tokStart, pos - tokStart);
+    int pathLen = 0;
+    if (sscanf(pathLenStr.c_str(), "%d", &pathLen) != 1 || pathLen < 0)
+      return {-1, {}};
+    e.pathLen = pathLen;
+    while (pos < line.size() && line[pos] == ' ')
+      pos++;
+    for (int k = 0; k <= pathLen && pos < line.size(); k++) {
+      if (pos + (size_t)g_numPos > line.size())
+        return {-1, {}};
+      string stateTok = line.substr(pos, (size_t)g_numPos);
+      for (int j = 0; j < g_numPos; j++)
+        if (stateTok[j] < '0' || stateTok[j] > '5')
+          return {-1, {}};
+      e.stateSequence.push_back(stateTok);
+      pos += (size_t)g_numPos;
+      while (pos < line.size() && line[pos] == ' ')
+        pos++;
+    }
+    if ((int)e.stateSequence.size() != pathLen + 1)
+      return {-1, {}};
+    entries.push_back(std::move(e));
   }
-  return {score, lines};
+  return {score, entries};
 }
 
 // ── Sliding Window Optimization ─────────────────────────────────────────────-
@@ -980,11 +1056,11 @@ static SearchResult runSlidingWindow() {
   string bestStatesFilename =
       prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(UNLOCKED_TYPE_END) + "_best_states.txt";
   int fileBestScore = -1;
-  vector<string> fileStateLines;
+  vector<BestStateEntry> fileEntries;
   {
-    auto [score, lines] = readBestStatesFile(bestStatesFilename);
+    auto [score, entries] = readBestStatesFile(bestStatesFilename);
     fileBestScore = score;
-    fileStateLines = std::move(lines);
+    fileEntries = std::move(entries);
   }
 
   while (true) {
@@ -1141,6 +1217,7 @@ static SearchResult runSlidingWindow() {
   result.bestState = currentState;
 
   // Update best_states file: overwrite if better, skip if worse, merge if same score. States stored alphabetically.
+  // Each line: state_digits path_length state_0 state_1 ... state_n. Reverse BFS fills path when missing.
   {
     if (bestCanonicalStates.empty())
       bestCanonicalStates.insert(canonical(result.bestState));
@@ -1148,21 +1225,57 @@ static SearchResult runSlidingWindow() {
     if (result.bestScore < fileBestScore) {
       // Worse than file: do nothing
     } else {
-      vector<string> toWrite;
+      ankerl::unordered_dense::map<string, BestStateEntry> byState;
       if (result.bestScore > fileBestScore) {
         for (StateType s : bestCanonicalStates)
-          toWrite.push_back(stateToLine(s));
+          byState[stateToLine(s)] = BestStateEntry{stateToLine(s), -1, {}};
       } else {
-        ankerl::unordered_dense::set<string> seen;
-        for (const string &line : fileStateLines)
-          seen.insert(line);
-        for (StateType s : bestCanonicalStates)
-          seen.insert(stateToLine(s));
-        toWrite.assign(seen.begin(), seen.end());
+        for (const BestStateEntry &e : fileEntries)
+          byState[e.stateStr] = e;
+        for (StateType s : bestCanonicalStates) {
+          string line = stateToLine(s);
+          if (byState.find(line) == byState.end())
+            byState[line] = BestStateEntry{line, -1, {}};
+        }
       }
-      sort(toWrite.begin(), toWrite.end());
+      vector<BestStateEntry> toWrite;
+      toWrite.reserve(byState.size());
+      for (auto &kv : byState)
+        toWrite.push_back(std::move(kv.second));
+      sort(toWrite.begin(), toWrite.end(),
+           [](const BestStateEntry &a, const BestStateEntry &b) { return a.stateStr < b.stateStr; });
       if ((int)toWrite.size() > SLIDING_WINDOW_MAX_BEST_STATES)
         toWrite.resize(SLIDING_WINDOW_MAX_BEST_STATES);
+
+      StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+      int needPath = 0;
+      for (const BestStateEntry &e : toWrite)
+        if (e.pathLen < 0 || RECOMPUTE_BEST_STATE_PATHS)
+          needPath++;
+      if (needPath > 0)
+        cout << "Computing paths for " << needPath << " best state(s) via reverse BFS...\n" << flush;
+      int missingPaths = 0;
+      int pathIndex = 0;
+      for (BestStateEntry &e : toWrite) {
+        if (e.pathLen >= 0 && !RECOMPUTE_BEST_STATE_PATHS)
+          continue;
+        pathIndex++;
+        if (needPath > 1)
+          cout << "  Best-state path " << pathIndex << "/" << needPath << ": running reverse BFS...\n" << flush;
+        StateType goal = lineToState(e.stateStr);
+        vector<pair<int, int>> buildPath = buildPathFromReverseBfs(goal);
+        if (buildPath.empty())
+          continue;
+        e.pathLen = (int)buildPath.size();
+        vector<StateType> seq = stateSequenceFromSteps(pathStartState, buildPath);
+        e.stateSequence.clear();
+        e.stateSequence.reserve(seq.size());
+        for (StateType st : seq)
+          e.stateSequence.push_back(stateToLine(st));
+        missingPaths++;
+      }
+      if (missingPaths > 0)
+        cout << "Computed paths for " << missingPaths << " state(s) via reverse BFS.\n" << flush;
 
       ofstream bestStatesFile(bestStatesFilename);
       if (!bestStatesFile) {
@@ -1170,8 +1283,16 @@ static SearchResult runSlidingWindow() {
       } else {
         bestStatesFile << "score " << result.bestScore << "\n";
         bestStatesFile << "count " << toWrite.size() << "\n";
-        for (const string &line : toWrite)
-          bestStatesFile << line << "\n";
+        for (const BestStateEntry &e : toWrite) {
+          if (e.pathLen >= 0) {
+            bestStatesFile << e.stateStr << " " << e.pathLen;
+            for (const string &st : e.stateSequence)
+              bestStatesFile << " " << st;
+            bestStatesFile << "\n";
+          } else {
+            bestStatesFile << e.stateStr << "\n";
+          }
+        }
         bestStatesFile.close();
         cout << "Wrote " << toWrite.size() << " best-score state(s) to " << bestStatesFilename << "\n" << flush;
       }

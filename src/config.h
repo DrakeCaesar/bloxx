@@ -105,8 +105,8 @@ const int UNLOCKED_TYPE_START = 5; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 3; // First level to process
-const int LEVEL_END = 3;   // Last level to process (inclusive)
+const int LEVEL_START = 4; // First level to process
+const int LEVEL_END = 4;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {
@@ -185,11 +185,11 @@ constexpr bool BACKWARD_TRANSITIONS_EMPTY[6][6] = {
 // Sliding window parameters
 const int MAX_DEPTH = 10; // Maximum BFS depth per window
 
-const int KERNEL_INDEX = 3; // Select which kernel to use
+const int KERNEL_INDEX = 2; // Select which kernel to use
 
 // Window traversal order: 0 = zigzag (diagonals, corner-based), 1 = snake
 // (row-wise: left→right, then one down, right→left, one down, etc.)
-const int WINDOW_PATH_TYPE = 1;
+const int WINDOW_PATH_TYPE = 0;
 
 // Kernel patterns: '.' = include in window, ' ' = exclude
 // Pattern is centered on the window position
@@ -235,6 +235,9 @@ inline KernelFitMode getWindowKernelFitMode() {
 
 // Sliding window: max number of canonical states at best score to save for later (path reconstruction, etc.)
 constexpr int SLIDING_WINDOW_MAX_BEST_STATES = 1000;
+
+// When true, always run reverse BFS for every best state when writing the best_states file (ignore cached paths).
+constexpr bool RECOMPUTE_BEST_STATE_PATHS = false;
 
 // Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
 // 128-bit. For multi-level we use 128-bit for all levels. For single-level
