@@ -233,6 +233,9 @@ inline KernelFitMode getWindowKernelFitMode() {
   }
 }
 
+// Sliding window: max number of canonical states at best score to save for later (path reconstruction, etc.)
+constexpr int SLIDING_WINDOW_MAX_BEST_STATES = 1000;
+
 // Select state type based on level - Level 1-3 use 64-bit, Level 4-5 use
 // 128-bit. For multi-level we use 128-bit for all levels. For single-level
 // you could switch at runtime using getCurrentLevel() <= 3.

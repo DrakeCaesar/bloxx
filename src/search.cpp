@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <ankerl/unordered_dense.h>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -481,8 +483,11 @@ static void redrawNewBestBlock(int bestScore, StateType bestState) {
 }
 
 // Shared BFS core over a fixed set of window positions.
+// When bestCanonicalStates is non-null, collect up to maxBestStates canonical states that achieve the best score.
 static void exploreWindowBfs(StateType startState, const vector<int> &windowPositions, vector<StateType> &newStates,
-                             int &bestScore, StateType &bestState, long long &explored) {
+                             int &bestScore, StateType &bestState, long long &explored,
+                             ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
+                             int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
   ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> localVisited;
   struct Entry {
     StateType state;
@@ -505,7 +510,13 @@ static void exploreWindowBfs(StateType startState, const vector<int> &windowPosi
     if (curScore > bestScore) {
       bestScore = curScore;
       bestState = cur;
+      if (bestCanonicalStates) {
+        bestCanonicalStates->clear();
+        bestCanonicalStates->insert(canonical(cur));
+      }
       redrawNewBestBlock(bestScore, bestState);
+    } else if (curScore == bestScore && bestCanonicalStates && (int)bestCanonicalStates->size() < maxBestStates) {
+      bestCanonicalStates->insert(canonical(cur));
     }
 
     for (int pos : windowPositions) {
@@ -602,7 +613,9 @@ static vector<int> buildSnakePathCenter() {
 
 // Center-based window exploration: centerIdx must be a valid grid position index.
 static void exploreWindowCenter(StateType startState, int centerIdx, vector<StateType> &newStates, int &bestScore,
-                                StateType &bestState, long long &explored) {
+                                StateType &bestState, long long &explored,
+                                ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
+                                int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
   auto [cr, cc] = GRID.positions[centerIdx];
   const auto &pat = WINDOW_KERNEL_PATTERN;
   KernelSize k = getKernelSize();
@@ -624,7 +637,8 @@ static void exploreWindowCenter(StateType startState, int centerIdx, vector<Stat
 
   printGridWithWindow(windowPositions);
   cout << "\n" << flush;
-  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored);
+  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored,
+                   bestCanonicalStates, maxBestStates);
 }
 
 // Bounding-box fit: require the kernel's rectangular extent from (topLeftRow, topLeftCol)
@@ -836,7 +850,9 @@ static vector<pair<int, int>> buildSnakePathTopLeftForPattern(const vector<strin
 
 // BFS within a window. (topLeftRow, topLeftCol) is the kernel's top-left; it may be a hole.
 static void exploreWindowTopLeft(StateType startState, int topLeftRow, int topLeftCol, vector<StateType> &newStates,
-                                 int &bestScore, StateType &bestState, long long &explored) {
+                                 int &bestScore, StateType &bestState, long long &explored,
+                                 ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
+                                 int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
   int r0 = topLeftRow, c0 = topLeftCol;
   KernelSize k = getKernelSize();
   const auto &pat = WINDOW_KERNEL_PATTERN;
@@ -855,13 +871,16 @@ static void exploreWindowTopLeft(StateType startState, int topLeftRow, int topLe
   printGridWithWindow(windowPositions);
   cout << "\n" << flush;
 
-  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored);
+  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored,
+                   bestCanonicalStates, maxBestStates);
 }
 
 // Top-left exploration with the kernel rotated 90 degrees clockwise.
 static void exploreWindowTopLeftRotated(StateType startState, int topLeftRow, int topLeftCol,
                                         vector<StateType> &newStates, int &bestScore, StateType &bestState,
-                                        long long &explored) {
+                                        long long &explored,
+                                        ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
+                                        int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
   int r0 = topLeftRow, c0 = topLeftCol;
   const auto &pat = getWindowKernelPatternRotated90();
   KernelSize k;
@@ -884,7 +903,8 @@ static void exploreWindowTopLeftRotated(StateType startState, int topLeftRow, in
   printGridWithWindow(windowPositions);
   cout << "\n" << flush;
 
-  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored);
+  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored,
+                   bestCanonicalStates, maxBestStates);
 }
 
 static SearchResult runSlidingWindow() {
@@ -911,6 +931,7 @@ static SearchResult runSlidingWindow() {
   StateType currentState = g_baseState;
   int currentScore = 0;
   int roundNum = 0;
+  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> bestCanonicalStates;
 
   while (true) {
     roundNum++;
@@ -946,7 +967,8 @@ static SearchResult runSlidingWindow() {
         auto [cr, cc] = GRID.positions[posIdx];
 
         auto t0 = chrono::steady_clock::now();
-        exploreWindowCenter(currentState, posIdx, exploredStates, bestScore, bestState, explored);
+        exploreWindowCenter(currentState, posIdx, exploredStates, bestScore, bestState, explored,
+                            &bestCanonicalStates, SLIDING_WINDOW_MAX_BEST_STATES);
         auto t1 = chrono::steady_clock::now();
         auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
 
@@ -982,7 +1004,8 @@ static SearchResult runSlidingWindow() {
           posIdx = itIdx->second;
 
         auto t0 = chrono::steady_clock::now();
-        exploreWindowTopLeft(currentState, r0, c0, exploredStates, bestScore, bestState, explored);
+        exploreWindowTopLeft(currentState, r0, c0, exploredStates, bestScore, bestState, explored,
+                             &bestCanonicalStates, SLIDING_WINDOW_MAX_BEST_STATES);
         auto t1 = chrono::steady_clock::now();
         auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
 
@@ -1006,7 +1029,8 @@ static SearchResult runSlidingWindow() {
           posIdx = itIdx->second;
 
         auto t0 = chrono::steady_clock::now();
-        exploreWindowTopLeftRotated(currentState, r0, c0, exploredStates, bestScore, bestState, explored);
+        exploreWindowTopLeftRotated(currentState, r0, c0, exploredStates, bestScore, bestState, explored,
+                                    &bestCanonicalStates, SLIDING_WINDOW_MAX_BEST_STATES);
         auto t1 = chrono::steady_clock::now();
         auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
 
@@ -1061,6 +1085,32 @@ static SearchResult runSlidingWindow() {
 
   result.bestScore = currentScore;
   result.bestState = currentState;
+
+  // Write all canonical states at best score to a separate file for later use (e.g. path reconstruction).
+  {
+    if (bestCanonicalStates.empty())
+      bestCanonicalStates.insert(canonical(result.bestState));
+    string prefix = "";
+    if (std::filesystem::current_path().filename() == "build")
+      prefix = "../";
+    string bestStatesFilename =
+        prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(UNLOCKED_TYPE_END) + "_best_states.txt";
+    ofstream bestStatesFile(bestStatesFilename);
+    if (!bestStatesFile) {
+      cerr << "Failed to open best-states file: " << bestStatesFilename << "\n";
+    } else {
+      bestStatesFile << "score " << result.bestScore << "\n";
+      bestStatesFile << "count " << bestCanonicalStates.size() << "\n";
+      for (StateType s : bestCanonicalStates) {
+        for (int pos = 0; pos < g_numPos; pos++)
+          bestStatesFile << (char)('0' + stateGet(s, pos));
+        bestStatesFile << "\n";
+      }
+      bestStatesFile.close();
+      cout << "Wrote " << bestCanonicalStates.size() << " best-score state(s) to " << bestStatesFilename << "\n"
+           << flush;
+    }
+  }
 
   cout << "\nFinal score after " << roundNum << " round(s): " << result.bestScore << "\n" << flush;
 
