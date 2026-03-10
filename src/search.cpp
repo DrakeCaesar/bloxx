@@ -417,6 +417,47 @@ inline ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> 
   return path;
 }
 
+// ── Best-states file (read/write) ─────────────────────────────────────────────
+
+// Serialize one canonical state to a single line of g_numPos digits '0'-'5'.
+static string stateToLine(StateType s) {
+  string line;
+  line.reserve((size_t)g_numPos);
+  for (int pos = 0; pos < g_numPos; pos++)
+    line += (char)('0' + stateGet(s, pos));
+  return line;
+}
+
+// Read best_states file if it exists. Returns (score, state lines). Invalid or missing file -> (-1, {}).
+static pair<int, vector<string>> readBestStatesFile(const string &filename) {
+  ifstream f(filename);
+  if (!f)
+    return {-1, {}};
+  string header;
+  if (!getline(f, header) || header.find("score ") != 0)
+    return {-1, {}};
+  int score = 0;
+  if (sscanf(header.c_str(), "score %d", &score) != 1)
+    return {-1, {}};
+  string countLine;
+  if (!getline(f, countLine) || countLine.find("count ") != 0)
+    return {-1, {}};
+  int count = 0;
+  if (sscanf(countLine.c_str(), "count %d", &count) != 1 || count < 0)
+    return {-1, {}};
+  vector<string> lines;
+  lines.reserve((size_t)min(count, 10000));
+  for (int i = 0; i < count; i++) {
+    string line;
+    if (!getline(f, line))
+      return {-1, {}};
+    if ((int)line.size() != g_numPos)
+      return {-1, {}};
+    lines.push_back(line);
+  }
+  return {score, lines};
+}
+
 // ── Sliding Window Optimization ─────────────────────────────────────────────-
 // Two window placement policies are supported:
 // - Center-based (original): choose a window *center* at an existing grid cell, require the kernel's
@@ -933,6 +974,19 @@ static SearchResult runSlidingWindow() {
   int roundNum = 0;
   ankerl::unordered_dense::set<StateType, StateHash, StateEqual> bestCanonicalStates;
 
+  string prefix = "";
+  if (std::filesystem::current_path().filename() == "build")
+    prefix = "../";
+  string bestStatesFilename =
+      prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(UNLOCKED_TYPE_END) + "_best_states.txt";
+  int fileBestScore = -1;
+  vector<string> fileStateLines;
+  {
+    auto [score, lines] = readBestStatesFile(bestStatesFilename);
+    fileBestScore = score;
+    fileStateLines = std::move(lines);
+  }
+
   while (true) {
     roundNum++;
     int scoreAtRoundStart = currentScore;
@@ -1086,29 +1140,41 @@ static SearchResult runSlidingWindow() {
   result.bestScore = currentScore;
   result.bestState = currentState;
 
-  // Write all canonical states at best score to a separate file for later use (e.g. path reconstruction).
+  // Update best_states file: overwrite if better, skip if worse, merge if same score. States stored alphabetically.
   {
     if (bestCanonicalStates.empty())
       bestCanonicalStates.insert(canonical(result.bestState));
-    string prefix = "";
-    if (std::filesystem::current_path().filename() == "build")
-      prefix = "../";
-    string bestStatesFilename =
-        prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(UNLOCKED_TYPE_END) + "_best_states.txt";
-    ofstream bestStatesFile(bestStatesFilename);
-    if (!bestStatesFile) {
-      cerr << "Failed to open best-states file: " << bestStatesFilename << "\n";
+
+    if (result.bestScore < fileBestScore) {
+      // Worse than file: do nothing
     } else {
-      bestStatesFile << "score " << result.bestScore << "\n";
-      bestStatesFile << "count " << bestCanonicalStates.size() << "\n";
-      for (StateType s : bestCanonicalStates) {
-        for (int pos = 0; pos < g_numPos; pos++)
-          bestStatesFile << (char)('0' + stateGet(s, pos));
-        bestStatesFile << "\n";
+      vector<string> toWrite;
+      if (result.bestScore > fileBestScore) {
+        for (StateType s : bestCanonicalStates)
+          toWrite.push_back(stateToLine(s));
+      } else {
+        ankerl::unordered_dense::set<string> seen;
+        for (const string &line : fileStateLines)
+          seen.insert(line);
+        for (StateType s : bestCanonicalStates)
+          seen.insert(stateToLine(s));
+        toWrite.assign(seen.begin(), seen.end());
       }
-      bestStatesFile.close();
-      cout << "Wrote " << bestCanonicalStates.size() << " best-score state(s) to " << bestStatesFilename << "\n"
-           << flush;
+      sort(toWrite.begin(), toWrite.end());
+      if ((int)toWrite.size() > SLIDING_WINDOW_MAX_BEST_STATES)
+        toWrite.resize(SLIDING_WINDOW_MAX_BEST_STATES);
+
+      ofstream bestStatesFile(bestStatesFilename);
+      if (!bestStatesFile) {
+        cerr << "Failed to open best-states file: " << bestStatesFilename << "\n";
+      } else {
+        bestStatesFile << "score " << result.bestScore << "\n";
+        bestStatesFile << "count " << toWrite.size() << "\n";
+        for (const string &line : toWrite)
+          bestStatesFile << line << "\n";
+        bestStatesFile.close();
+        cout << "Wrote " << toWrite.size() << " best-score state(s) to " << bestStatesFilename << "\n" << flush;
+      }
     }
   }
 
