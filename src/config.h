@@ -114,6 +114,12 @@ inline int &getCurrentLevel() {
   return currentLevel;
 }
 
+// Current unlocked type being processed (for multi-level/multi-type runs)
+inline int &getCurrentUnlockedType() {
+  static int currentUnlockedType = UNLOCKED_TYPE_END;
+  return currentUnlockedType;
+}
+
 // Reverse BFS (path reconstruction): number of threads per layer
 const int REVERSE_BFS_NUM_THREADS = 4;
 // Throttle for status-line updates (expand/prune/merge progress); milliseconds

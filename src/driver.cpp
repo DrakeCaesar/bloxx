@@ -51,6 +51,7 @@ int main() {
 
       // Reinitialize for this level and tower type
       reinitializeGrid(level);
+      getCurrentUnlockedType() = unlockedType;
       GRID.computeMaxTypes(unlockedType);
 
       auto runStart = chrono::steady_clock::now();

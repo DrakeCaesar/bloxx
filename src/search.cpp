@@ -1089,7 +1089,7 @@ static SearchResult runSlidingWindow() {
   if (std::filesystem::current_path().filename() == "build")
     prefix = "../";
   string bestStatesFilename =
-      prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(UNLOCKED_TYPE_END) + "_best_states.txt";
+      prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(getCurrentUnlockedType()) + "_best_states.txt";
   int fileBestScore = -1;
   vector<BestStateEntry> fileEntries;
   {
@@ -1391,6 +1391,7 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
   result.bestState = startState;
   result.bestScore = 0;
   result.explored = 0;
+  ankerl::unordered_dense::set<StateType, StateHash, StateEqual> bestCanonicalStates;
 
   while (head < q.size()) {
     auto [cur, curScore] = q[head++];
@@ -1399,8 +1400,12 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
     if (curScore > result.bestScore) {
       result.bestScore = curScore;
       result.bestState = cur;
+      bestCanonicalStates.clear();
+      bestCanonicalStates.insert(canonical(cur));
       cout << "New best score: " << result.bestScore << "\n";
       printGrid(cur);
+    } else if (curScore == result.bestScore) {
+      bestCanonicalStates.insert(canonical(cur));
     }
 
     for (int pos = 0; pos < g_numPos; pos++) {
@@ -1426,19 +1431,13 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
 
   result.uniqueStates = visited.size();
 
-  // Collect all states at best score and write them to best_states file (with paths from BFS).
+  // Write all states at best score (collected during BFS) to best_states file (with paths from BFS).
   {
-    ankerl::unordered_dense::set<StateType, StateHash, StateEqual> bestCanonicalStates;
-    for (const auto &key : visited) {
-      StateType s = storageToState<S>(key);
-      if (scoreGrid(s) == result.bestScore)
-        bestCanonicalStates.insert(canonical(s));
-    }
     string prefix = "";
     if (std::filesystem::current_path().filename() == "build")
       prefix = "../";
     string bestStatesFilename =
-        prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(UNLOCKED_TYPE_END) + "_best_states.txt";
+        prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(getCurrentUnlockedType()) + "_best_states.txt";
     StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
     vector<BestStateEntry> toWrite;
     toWrite.reserve(bestCanonicalStates.size());
