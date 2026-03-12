@@ -98,10 +98,10 @@ static void buildLookupTables() {
 }
 
 // ── Path reconstruction helpers ──────────────────────────────────────────────
-static int scoreGrid(StateType state) {
+int scoreGrid(StateType state) {
   int score = 0;
   for (int i = 0; i < g_numPos; i++)
-    score += stateGet(state, i) - 1;
+    score += stateGet(state, i);
   return score;
 }
 
@@ -429,7 +429,7 @@ inline ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> 
 
   StateType bfsStart = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
   path.emplace(encodeTransition(bfsStart, {})); // sentinel: packed=255
-  q.push_back({bfsStart, 0});
+  q.push_back({bfsStart, scoreGrid(bfsStart)});
 
   while (head < q.size()) {
     auto [cur, curScore] = q[head++];
@@ -1061,9 +1061,10 @@ static void exploreWindowTopLeftRotated(StateType startState, int topLeftRow, in
 
 static SearchResult runSlidingWindow() {
   s_newBestBlockLines = 0;
-  SearchResult result{g_baseState, 0, 0, 0};
+  int baseScore = scoreGrid(g_baseState);
+  SearchResult result{g_baseState, baseScore, 0, 0};
   result.bestState = g_baseState;
-  result.bestScore = 0;
+  result.bestScore = baseScore;
   result.explored = 0;
 
   // (kernel pattern intentionally not printed; keep output compact)
@@ -1081,7 +1082,7 @@ static SearchResult runSlidingWindow() {
   };
 
   StateType currentState = g_baseState;
-  int currentScore = 0;
+  int currentScore = baseScore;
   int roundNum = 0;
   ankerl::unordered_dense::set<StateType, StateHash, StateEqual> bestCanonicalStates;
 
@@ -1385,11 +1386,12 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
   size_t head = 0;
 
   StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+  int startScore = scoreGrid(startState);
   visited.emplace(encodeForStorage<S>(startState, {})); // sentinel: no parent
-  q.push_back({startState, 0});
+  q.push_back({startState, startScore});
 
   result.bestState = startState;
-  result.bestScore = 0;
+  result.bestScore = startScore;
   result.explored = 0;
   ankerl::unordered_dense::set<StateType, StateHash, StateEqual> bestCanonicalStates;
 

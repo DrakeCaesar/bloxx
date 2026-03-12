@@ -98,14 +98,15 @@ void runDFSSearch(SearchResult &result) {
   int bestPathLength = INT_MAX;
 
   StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+  int startScore = scoreGrid(startState);
   minDepth[startState] = 0;
   path.push_back(startState);
 
   result.bestState = startState;
-  result.bestScore = 0;
+  result.bestScore = startScore;
   result.explored = 0;
 
-  dfsVisit(startState, 0, 0, path, minDepth, result, bestPath, bestPathLength);
+  dfsVisit(startState, startScore, 0, path, minDepth, result, bestPath, bestPathLength);
   result.uniqueStates = minDepth.size();
 
   auto dfsEnd = chrono::steady_clock::now();

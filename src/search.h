@@ -21,5 +21,8 @@ struct SearchResult {
   size_t uniqueStates;
 };
 
+// Score = sum of position types (0..5). Used by BFS, DFS, and sliding window.
+int scoreGrid(StateType state);
+
 // Print a build path (from reverse BFS or DFS). Uses PATH_FROM_EMPTY / expand.
 void printBuildPathSteps(const std::vector<std::pair<int, int>> &buildPath);
