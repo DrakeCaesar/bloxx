@@ -136,7 +136,7 @@ Tower placement follows dependency rules verified by `canPlace()`:
 - **Type 4 (Yellow)**: Requires Types 1, 2, and 3 neighbors
 - **Type 5 (White)**: Requires all lower types (1-4) as neighbors
 
-Score = sum of (type - 1) for all positions (max type = 5 per position)
+Score = sum of position types for all positions (type 0 = 0, type 1 = 1, …, type 5 = 5)
 
 `neighborPresent()` computes bitmask once per (state, position) for efficiency
 
