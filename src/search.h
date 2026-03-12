@@ -2,16 +2,15 @@
 
 #include "config.h"
 #include <fstream>
-#include <streambuf>
+#include <iostream>
 #include <utility>
 #include <vector>
 
 // High-level solver entrypoint for a single level and unlocked-type
 void runSingleLevel();
 
-// Baseline output redirection hooks used by the solver
+// When non-null and open, baseline build path is written here instead of cout
 extern std::ofstream *g_baselineFile;
-extern std::streambuf *g_originalCoutBuf;
 
 // Result of a search run (BFS, DFS, or sliding window).
 struct SearchResult {
@@ -25,4 +24,4 @@ struct SearchResult {
 int scoreGrid(StateType state);
 
 // Print a build path (from reverse BFS or DFS). Uses PATH_FROM_EMPTY / expand.
-void printBuildPathSteps(const std::vector<std::pair<int, int>> &buildPath);
+void printBuildPathSteps(const std::vector<std::pair<int, int>> &buildPath, std::ostream &out = std::cout);

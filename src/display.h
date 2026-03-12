@@ -271,23 +271,23 @@ inline const string &fgColor(int t, bool placed) { return placed ? FG_COLORS[t] 
 
 // ── Grid display ─────────────────────────────────────────────────────────────
 
-inline void printGrid(StateType s) {
+inline void printGrid(StateType s, std::ostream& out = std::cout) {
   for (int r = 0; r < GRID.rows; r++) {
     pair<int, int> firstCoord = {r, 0};
     if (GRID.coordToIdx.count(firstCoord)) {
       int firstT = stateGet(s, GRID.coordToIdx[firstCoord]);
-      cout << FG_COLORS[firstT] << "▐" << RESET;
+      out << FG_COLORS[firstT] << "▐" << RESET;
     } else {
-      cout << " ";
+      out << " ";
     }
 
     for (int c = 0; c < GRID.cols; c++) {
       pair<int, int> coord = {r, c};
       if (GRID.coordToIdx.count(coord)) {
         int t = stateGet(s, GRID.coordToIdx[coord]);
-        cout << COLORS[t] << BLACK_TEXT << t << RESET;
+        out << COLORS[t] << BLACK_TEXT << t << RESET;
       } else {
-        cout << " ";
+        out << " ";
       }
 
       if (c < GRID.cols - 1) {
@@ -298,15 +298,15 @@ inline void printGrid(StateType s) {
         if (currExists && nextExists) {
           int t = stateGet(s, GRID.coordToIdx[coord]);
           int nextT = stateGet(s, GRID.coordToIdx[nextCoord]);
-          cout << FG_COLORS[nextT] << COLORS[t] << "▐" << RESET;
+          out << FG_COLORS[nextT] << COLORS[t] << "▐" << RESET;
         } else if (currExists && !nextExists) {
           int t = stateGet(s, GRID.coordToIdx[coord]);
-          cout << FG_COLORS[t] << "▌" << RESET;
+          out << FG_COLORS[t] << "▌" << RESET;
         } else if (!currExists && nextExists) {
           int nextT = stateGet(s, GRID.coordToIdx[nextCoord]);
-          cout << FG_COLORS[nextT] << "▐" << RESET;
+          out << FG_COLORS[nextT] << "▐" << RESET;
         } else {
-          cout << " ";
+          out << " ";
         }
       }
     }
@@ -314,9 +314,9 @@ inline void printGrid(StateType s) {
     pair<int, int> lastCoord = {r, GRID.cols - 1};
     if (GRID.coordToIdx.count(lastCoord)) {
       int lastT = stateGet(s, GRID.coordToIdx[lastCoord]);
-      cout << FG_COLORS[lastT] << "▌" << RESET << "\n";
+      out << FG_COLORS[lastT] << "▌" << RESET << "\n";
     } else {
-      cout << " \n";
+      out << " \n";
     }
   }
 }
@@ -451,16 +451,16 @@ inline void printGridWithWindow(const std::vector<int> &windowPositionIndices) {
 
 // printGrid with placed mask: bit i=1 means position i has been explicitly
 // built. Unplaced positions (bit=0, type=0) are rendered as dark empty cells.
-inline void printGrid(StateType s, uint64_t placedMask) {
+inline void printGrid(StateType s, uint64_t placedMask, std::ostream& out = std::cout) {
   for (int r = 0; r < GRID.rows; r++) {
     pair<int, int> firstCoord = {r, 0};
     if (GRID.coordToIdx.count(firstCoord)) {
       int idx = GRID.coordToIdx[firstCoord];
       int firstT = stateGet(s, idx);
       bool p = (placedMask >> idx) & 1;
-      cout << fgColor(firstT, p) << "▐" << RESET;
+      out << fgColor(firstT, p) << "▐" << RESET;
     } else {
-      cout << " ";
+      out << " ";
     }
 
     for (int c = 0; c < GRID.cols; c++) {
@@ -470,12 +470,12 @@ inline void printGrid(StateType s, uint64_t placedMask) {
         int t = stateGet(s, idx);
         bool p = (placedMask >> idx) & 1;
         if (p) {
-          cout << COLORS[t] << BLACK_TEXT << t << RESET;
+          out << COLORS[t] << BLACK_TEXT << t << RESET;
         } else {
-          cout << EMPTY_BG << EMPTY_FG << "·" << RESET;
+          out << EMPTY_BG << EMPTY_FG << "·" << RESET;
         }
       } else {
-        cout << " ";
+        out << " ";
       }
 
       if (c < GRID.cols - 1) {
@@ -490,19 +490,19 @@ inline void printGrid(StateType s, uint64_t placedMask) {
           int nextT = stateGet(s, nextIdx);
           bool p = (placedMask >> idx) & 1;
           bool np = (placedMask >> nextIdx) & 1;
-          cout << fgColor(nextT, np) << bgColor(t, p) << "▐" << RESET;
+          out << fgColor(nextT, np) << bgColor(t, p) << "▐" << RESET;
         } else if (currExists && !nextExists) {
           int idx = GRID.coordToIdx[coord];
           int t = stateGet(s, idx);
           bool p = (placedMask >> idx) & 1;
-          cout << fgColor(t, p) << "▌" << RESET;
+          out << fgColor(t, p) << "▌" << RESET;
         } else if (!currExists && nextExists) {
           int nextIdx = GRID.coordToIdx[nextCoord];
           int nextT = stateGet(s, nextIdx);
           bool np = (placedMask >> nextIdx) & 1;
-          cout << fgColor(nextT, np) << "▐" << RESET;
+          out << fgColor(nextT, np) << "▐" << RESET;
         } else {
-          cout << " ";
+          out << " ";
         }
       }
     }
@@ -512,9 +512,9 @@ inline void printGrid(StateType s, uint64_t placedMask) {
       int idx = GRID.coordToIdx[lastCoord];
       int lastT = stateGet(s, idx);
       bool p = (placedMask >> idx) & 1;
-      cout << fgColor(lastT, p) << "▌" << RESET << "\n";
+      out << fgColor(lastT, p) << "▌" << RESET << "\n";
     } else {
-      cout << " \n";
+      out << " \n";
     }
   }
 }

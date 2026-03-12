@@ -243,7 +243,7 @@ template <typename S> static void runReverseTask(ReverseTaskContext<S> *ctx) {
 
   // One live status line under the table. On operation switch we record the
   // current line; after the table we print all recorded lines for debugging.
-  DynamicStatusLine opLine(g_originalCoutBuf == nullptr);
+  DynamicStatusLine opLine(!g_baselineFile || !g_baselineFile->is_open());
   auto reverseStart = std::chrono::steady_clock::now();
   std::string lastOp;
   std::vector<std::string> opLog;
@@ -720,10 +720,7 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
   std::cout << "\nReverse BFS visited " << formatNum(totalReverseVisited)
             << " states (map size after pruning: " << formatNum(parentReverse.size()) << ").\n";
 
-  if (g_baselineFile && g_baselineFile->is_open()) {
-    g_originalCoutBuf = std::cout.rdbuf();
-    std::cout.rdbuf(g_baselineFile->rdbuf());
-  }
+  std::ostream &pathOut = (g_baselineFile && g_baselineFile->is_open()) ? *g_baselineFile : std::cout;
 
   std::vector<std::pair<int, int>> steps;
 
@@ -753,27 +750,23 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
         }
         maxTowersLeft = std::max(maxTowersLeft, t);
       }
-      if (g_originalCoutBuf) {
-        std::cout.rdbuf(g_originalCoutBuf);
-        g_originalCoutBuf = nullptr;
-      }
       std::lock_guard<std::mutex> lock(coutMutex);
-      std::cout << "[Main] Reverse BFS did not reach path start. Cannot build "
-                   "path."
-                << std::endl;
+      pathOut << "[Main] Reverse BFS did not reach path start. Cannot build "
+                 "path."
+              << std::endl;
       if (minTowersLeft <= g_numPos) {
-        std::cout << "[Main] Closest reverse states have " << minTowersLeft << " towers; path start requires "
-                  << baseTowers << ". Remaining map tower range: " << minTowersLeft << "-" << maxTowersLeft << "."
-                  << std::endl;
+        pathOut << "[Main] Closest reverse states have " << minTowersLeft << " towers; path start requires "
+                << baseTowers << ". Remaining map tower range: " << minTowersLeft << "-" << maxTowersLeft << "."
+                << std::endl;
         if (lowestCount > 0) {
           size_t shown = lowestStates.size();
           for (size_t i = 0; i < shown; i++) {
-            std::cout << "[Main] Lowest-tower state #" << (i + 1) << " (" << minTowersLeft << " towers):" << std::endl;
-            printGrid(lowestStates[i]);
+            pathOut << "[Main] Lowest-tower state #" << (i + 1) << " (" << minTowersLeft << " towers):" << std::endl;
+            printGrid(lowestStates[i], pathOut);
           }
           if (lowestCount > shown) {
-            std::cout << "[Main] ... plus " << formatNum((long long)(lowestCount - shown))
-                      << " more lowest-tower states not shown." << std::endl;
+            pathOut << "[Main] ... plus " << formatNum((long long)(lowestCount - shown))
+                    << " more lowest-tower states not shown." << std::endl;
           }
         }
       }
@@ -784,10 +777,6 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
       auto tr = storageTrans<S>(*parentReverse.find(toStorageKey<S>(cur)));
       steps.push_back({tr.getPos(), tr.getType()});
       cur = canonical(stateSet(cur, tr.getPos(), tr.getType()));
-    }
-    if (g_originalCoutBuf) {
-      std::cout.rdbuf(g_originalCoutBuf);
-      g_originalCoutBuf = nullptr;
     }
     return steps;
   }
@@ -811,22 +800,18 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
 
   {
     std::lock_guard<std::mutex> lock(coutMutex);
-    std::cout << "[Main] Found " << formatNum(interceptCount)
-              << " states in both maps. Best intercept has forward depth "
-              << forwardDepthOfImpl<S>(parentForward, meetState) << ", reverse depth "
-              << reverseDepthOfImpl<S>(parentReverse, meetState) << ", total " << formatNum((long long)bestTotal)
-              << " steps." << std::endl;
+    pathOut << "[Main] Found " << formatNum(interceptCount)
+            << " states in both maps. Best intercept has forward depth "
+            << forwardDepthOfImpl<S>(parentForward, meetState) << ", reverse depth "
+            << reverseDepthOfImpl<S>(parentReverse, meetState) << ", total " << formatNum((long long)bestTotal)
+            << " steps." << std::endl;
   }
 
   if (interceptCount == 0) {
-    if (g_originalCoutBuf) {
-      std::cout.rdbuf(g_originalCoutBuf);
-      g_originalCoutBuf = nullptr;
-    }
     std::lock_guard<std::mutex> lock(coutMutex);
-    std::cout << "[Main] No intercept: no state reached by both searches. "
-                 "Cannot reconstruct path."
-              << std::endl;
+    pathOut << "[Main] No intercept: no state reached by both searches. "
+               "Cannot reconstruct path."
+            << std::endl;
     return {};
   }
 
@@ -869,10 +854,6 @@ template <typename S> static std::vector<std::pair<int, int>> buildPathFromRever
   }
 
   steps.insert(steps.begin(), stepsForward.begin(), stepsForward.end());
-  if (g_originalCoutBuf) {
-    std::cout.rdbuf(g_originalCoutBuf);
-    g_originalCoutBuf = nullptr;
-  }
   return steps;
 }
 

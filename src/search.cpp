@@ -24,9 +24,8 @@
 
 using namespace std;
 
-// Global file stream for baseline output (only used for reverse BFS section)
+// When non-null and open, baseline build path is written here instead of cout
 ofstream *g_baselineFile = nullptr;
-streambuf *g_originalCoutBuf = nullptr;
 
 // Number of lines last drawn for "New best" block (for in-place redraw)
 static int s_newBestBlockLines = 0;
@@ -223,7 +222,8 @@ static int chooseFrameMatchingFinal(const vector<pair<int, int>> &expandedSteps,
   return -1;
 }
 
-static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, StateType startState) {
+static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, StateType startState,
+                             ostream &out = cout) {
   const bool fromEmpty = (startState == StateType(0));
   StateType canonState = startState;
   StateType displayState = startState;
@@ -257,12 +257,12 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, State
   displayState = (fixedSymm >= 0) ? applyInversePerm(startState, g_symmPerm[fixedSymm]) : startState;
   placedMask = 0;
 
-  cout << "\n--- Build path (" << totalSteps << " steps) ---\n\n";
-  cout << "Start (" << (fromEmpty ? "empty" : "all blue") << " board):\n";
+  out << "\n--- Build path (" << totalSteps << " steps) ---\n\n";
+  out << "Start (" << (fromEmpty ? "empty" : "all blue") << " board):\n";
   if (fixedSymm >= 0)
-    printGrid(applyInversePerm(startState, g_symmPerm[fixedSymm]), uint64_t(0));
+    printGrid(applyInversePerm(startState, g_symmPerm[fixedSymm]), uint64_t(0), out);
   else
-    printGrid(startState, uint64_t(0));
+    printGrid(startState, uint64_t(0), out);
   int validSteps = 0, invalidSteps = 0;
   int stepNum = 1;
 
@@ -297,15 +297,15 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, State
     advanceStateForDisplay(canonState, displayState, placedMask, pos, newType);
 
     auto [r, c] = GRID.positions[physPos];
-    cout << "\nStep " << stepNum << ": pos " << physPos << " (" << r << "," << c << ")  ";
+    out << "\nStep " << stepNum << ": pos " << physPos << " (" << r << "," << c << ")  ";
     if (oldType == -1) {
-      cout << "empty -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
+      out << "empty -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
     } else {
-      cout << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET << " (" << oldType << ") -> "
+      out << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET << " (" << oldType << ") -> "
            << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
     }
-    cout << (valid ? "  \033[32m\u2713\033[0m" : "  \033[31m\u2717 INVALID\033[0m") << "\n";
-    printGrid(displayState, placedMask);
+    out << (valid ? "  \033[32m\u2713\033[0m" : "  \033[31m\u2717 INVALID\033[0m") << "\n";
+    printGrid(displayState, placedMask, out);
     stepNum++;
   }
 
@@ -316,11 +316,11 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, State
       if (!((placedMask >> i) & 1)) {
         placedMask |= (1ull << i);
         auto [r, c] = GRID.positions[i];
-        cout << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c << ")  ";
-        cout << "empty -> " << COLORS[1] << BLACK_TEXT << COLOR_NAMES[1] << RESET << " (1)";
-        cout << "  \033[32m\u2713\033[0m"
+        out << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c << ")  ";
+        out << "empty -> " << COLORS[1] << BLACK_TEXT << COLOR_NAMES[1] << RESET << " (1)";
+        out << "  \033[32m\u2713\033[0m"
              << "\n";
-        printGrid(displayState, placedMask);
+        printGrid(displayState, placedMask, out);
         stepNum++;
         validSteps++;
       }
@@ -328,18 +328,19 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, State
   }
 
   int reachedScore = scoreGrid(displayState);
-  cout << "\nBuild path: " << totalSteps << " steps, " << validSteps << " valid, " << invalidSteps << " invalid";
+  out << "\nBuild path: " << totalSteps << " steps, " << validSteps << " valid, " << invalidSteps << " invalid";
   if (invalidSteps == 0) {
-    cout << " \033[32m\u2014 ALL VALID\033[0m";
+    out << " \033[32m\u2014 ALL VALID\033[0m";
   } else {
-    cout << " \033[31m\u2014 HAS INVALID STEPS\033[0m";
+    out << " \033[31m\u2014 HAS INVALID STEPS\033[0m";
   }
-  cout << "\nReached score: " << reachedScore << "\n";
+  out << "\nReached score: " << reachedScore << "\n";
 }
 
 template <typename S>
 inline void printBuildPath(StateType bestState,
-                           const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &visited) {
+                           const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &visited,
+                           ostream &out = cout) {
   vector<pair<int, int>> steps; // (pos, newType) — pos in state *before* the move
   StateType cur = bestState;
   while (true) {
@@ -368,9 +369,9 @@ inline void printBuildPath(StateType bestState,
   }
   reverse(steps.begin(), steps.end());
   if (PATH_FROM_EMPTY)
-    printExpandedPath(steps, StateType(0));
+    printExpandedPath(steps, StateType(0), out);
   else
-    printExpandedPath(expandPathForEmptyBoard(steps), g_baseState);
+    printExpandedPath(expandPathForEmptyBoard(steps), g_baseState, out);
 }
 
 // Return path (steps) from start to target using the BFS visited set. Empty if target not in visited.
@@ -408,11 +409,11 @@ static vector<pair<int, int>> getPathFromVisited(
   return steps;
 }
 
-void printBuildPathSteps(const vector<pair<int, int>> &buildPath) {
+void printBuildPathSteps(const vector<pair<int, int>> &buildPath, ostream &out) {
   if (PATH_FROM_EMPTY)
-    printExpandedPath(buildPath, StateType(0));
+    printExpandedPath(buildPath, StateType(0), out);
   else
-    printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState);
+    printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState, out);
 }
 
 // BFS from base state (all blue) stopping as soon as target is reached.
@@ -1090,7 +1091,8 @@ static SearchResult runSlidingWindow() {
   if (std::filesystem::current_path().filename() == "build")
     prefix = "../";
   string bestStatesFilename =
-      prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(getCurrentUnlockedType()) + "_best_states.txt";
+      prefix + "best_states/level" + to_string(getCurrentLevel()) + "_type" + to_string(getCurrentUnlockedType()) + ".txt";
+  std::filesystem::create_directories(std::filesystem::path(bestStatesFilename).parent_path());
   int fileBestScore = -1;
   vector<BestStateEntry> fileEntries;
   {
@@ -1313,7 +1315,7 @@ static SearchResult runSlidingWindow() {
       if (missingPaths > 0)
         cout << "Computed paths for " << missingPaths << " state(s) via reverse BFS.\n" << flush;
 
-      ofstream bestStatesFile(bestStatesFilename);
+      ofstream bestStatesFile(bestStatesFilename, ios::binary);
       if (!bestStatesFile) {
         cerr << "Failed to open best-states file: " << bestStatesFilename << "\n";
       } else {
@@ -1354,20 +1356,15 @@ static SearchResult runSlidingWindow() {
       return result;
     }
 
+    ostream &pathOut = (g_baselineFile && g_baselineFile->is_open()) ? *g_baselineFile : cout;
     if (PATH_FROM_EMPTY)
-      printExpandedPath(buildPath, StateType(0));
+      printExpandedPath(buildPath, StateType(0), pathOut);
     else
-      printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState);
+      printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState, pathOut);
 
-    cout << "\nFinal score: " << result.bestScore << "\n";
+    pathOut << "\nFinal score: " << result.bestScore << "\n";
   }
   result.uniqueStates = 0;
-
-  // Restore cout if it was redirected
-  if (g_originalCoutBuf) {
-    cout.rdbuf(g_originalCoutBuf);
-    g_originalCoutBuf = nullptr;
-  }
 
   return result;
 }
@@ -1439,7 +1436,8 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
     if (std::filesystem::current_path().filename() == "build")
       prefix = "../";
     string bestStatesFilename =
-        prefix + "level" + to_string(getCurrentLevel()) + "_type" + to_string(getCurrentUnlockedType()) + "_best_states.txt";
+        prefix + "best_states/level" + to_string(getCurrentLevel()) + "_type" + to_string(getCurrentUnlockedType()) + ".txt";
+    std::filesystem::create_directories(std::filesystem::path(bestStatesFilename).parent_path());
     StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
     vector<BestStateEntry> toWrite;
     toWrite.reserve(bestCanonicalStates.size());
@@ -1458,7 +1456,7 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
          [](const BestStateEntry &a, const BestStateEntry &b) { return a.stateStr < b.stateStr; });
     if ((int)toWrite.size() > SLIDING_WINDOW_MAX_BEST_STATES)
       toWrite.resize(SLIDING_WINDOW_MAX_BEST_STATES);
-    ofstream bestStatesFile(bestStatesFilename);
+    ofstream bestStatesFile(bestStatesFilename, ios::binary);
     if (!bestStatesFile) {
       cerr << "Failed to open best-states file: " << bestStatesFilename << "\n";
     } else {
@@ -1475,15 +1473,8 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
     }
   }
 
-  if (g_baselineFile && g_baselineFile->is_open()) {
-    g_originalCoutBuf = cout.rdbuf();
-    cout.rdbuf(g_baselineFile->rdbuf());
-  }
-  printBuildPath<S>(result.bestState, visited);
-  if (g_originalCoutBuf) {
-    cout.rdbuf(g_originalCoutBuf);
-    g_originalCoutBuf = nullptr;
-  }
+  ostream &pathOut = (g_baselineFile && g_baselineFile->is_open()) ? *g_baselineFile : cout;
+  printBuildPath<S>(result.bestState, visited, pathOut);
 }
 
 // ── Public entrypoint for a single level/unlocked-type configuration ────────

@@ -114,15 +114,9 @@ void runDFSSearch(SearchResult &result) {
   printPhaseTiming("DFS search", (long long)elapsedMs);
   cout << "  States explored: " << formatNum(result.explored) << ", unique: " << formatNum(result.uniqueStates) << "\n";
 
-  if (g_baselineFile && g_baselineFile->is_open()) {
-    g_originalCoutBuf = cout.rdbuf();
-    cout.rdbuf(g_baselineFile->rdbuf());
-  }
   vector<pair<int, int>> buildPath = stateSequenceToSteps(bestPath);
-  if (!buildPath.empty())
-    printBuildPathSteps(buildPath);
-  if (g_originalCoutBuf) {
-    cout.rdbuf(g_originalCoutBuf);
-    g_originalCoutBuf = nullptr;
+  if (!buildPath.empty()) {
+    ostream &pathOut = (g_baselineFile && g_baselineFile->is_open()) ? *g_baselineFile : cout;
+    printBuildPathSteps(buildPath, pathOut);
   }
 }
