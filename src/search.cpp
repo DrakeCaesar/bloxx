@@ -222,8 +222,7 @@ static int chooseFrameMatchingFinal(const vector<pair<int, int>> &expandedSteps,
   return -1;
 }
 
-static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, StateType startState,
-                             ostream &out = cout) {
+static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, StateType startState, ostream &out = cout) {
   const bool fromEmpty = (startState == StateType(0));
   StateType canonState = startState;
   StateType displayState = startState;
@@ -302,7 +301,7 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, State
       out << "empty -> " << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
     } else {
       out << COLORS[oldType] << BLACK_TEXT << COLOR_NAMES[oldType] << RESET << " (" << oldType << ") -> "
-           << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
+          << COLORS[newType] << BLACK_TEXT << COLOR_NAMES[newType] << RESET << " (" << newType << ")";
     }
     out << (valid ? "  \033[32m\u2713\033[0m" : "  \033[31m\u2717 INVALID\033[0m") << "\n";
     printGrid(displayState, placedMask, out);
@@ -319,7 +318,7 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, State
         out << "\nStep " << stepNum << ": pos " << i << " (" << r << "," << c << ")  ";
         out << "empty -> " << COLORS[1] << BLACK_TEXT << COLOR_NAMES[1] << RESET << " (1)";
         out << "  \033[32m\u2713\033[0m"
-             << "\n";
+            << "\n";
         printGrid(displayState, placedMask, out);
         stepNum++;
         validSteps++;
@@ -376,9 +375,9 @@ inline void printBuildPath(StateType bestState,
 
 // Return path (steps) from start to target using the BFS visited set. Empty if target not in visited.
 template <typename S>
-static vector<pair<int, int>> getPathFromVisited(
-    StateType target,
-    const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &visited) {
+static vector<pair<int, int>>
+getPathFromVisited(StateType target,
+                   const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &visited) {
   vector<pair<int, int>> steps;
   StateType cur = target;
   while (true) {
@@ -459,8 +458,8 @@ inline ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> 
 // Legacy: line may be state_digits only (no path); we then run reverse BFS to fill path.
 
 struct BestStateEntry {
-  string stateStr;             // g_numPos digits
-  int pathLen = -1;            // -1 = missing
+  string stateStr;              // g_numPos digits
+  int pathLen = -1;             // -1 = missing
   vector<string> stateSequence; // pathLen+1 state strings when pathLen >= 0
 };
 
@@ -486,8 +485,7 @@ static StateType lineToState(const string &s) {
 }
 
 // From startState apply each step; return sequence of states (startState, ..., endState).
-static vector<StateType> stateSequenceFromSteps(StateType startState,
-                                                const vector<pair<int, int>> &steps) {
+static vector<StateType> stateSequenceFromSteps(StateType startState, const vector<pair<int, int>> &steps) {
   vector<StateType> seq;
   seq.reserve(steps.size() + 1);
   seq.push_back(startState);
@@ -637,10 +635,11 @@ static void redrawNewBestBlock(int bestScore, StateType bestState) {
 
 // Shared BFS core over a fixed set of window positions.
 // When bestCanonicalStates is non-null, collect up to maxBestStates canonical states that achieve the best score.
-static void exploreWindowBfs(StateType startState, const vector<int> &windowPositions, vector<StateType> &newStates,
-                             int &bestScore, StateType &bestState, long long &explored,
-                             ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
-                             int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
+static void
+exploreWindowBfs(StateType startState, const vector<int> &windowPositions, vector<StateType> &newStates, int &bestScore,
+                 StateType &bestState, long long &explored,
+                 ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
+                 int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
   ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> localVisited;
   struct Entry {
     StateType state;
@@ -765,10 +764,11 @@ static vector<int> buildSnakePathCenter() {
 }
 
 // Center-based window exploration: centerIdx must be a valid grid position index.
-static void exploreWindowCenter(StateType startState, int centerIdx, vector<StateType> &newStates, int &bestScore,
-                                StateType &bestState, long long &explored,
-                                ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
-                                int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
+static void
+exploreWindowCenter(StateType startState, int centerIdx, vector<StateType> &newStates, int &bestScore,
+                    StateType &bestState, long long &explored,
+                    ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
+                    int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
   auto [cr, cc] = GRID.positions[centerIdx];
   const auto &pat = WINDOW_KERNEL_PATTERN;
   KernelSize k = getKernelSize();
@@ -790,8 +790,8 @@ static void exploreWindowCenter(StateType startState, int centerIdx, vector<Stat
 
   printGridWithWindow(windowPositions);
   cout << "\n" << flush;
-  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored,
-                   bestCanonicalStates, maxBestStates);
+  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored, bestCanonicalStates,
+                   maxBestStates);
 }
 
 // Bounding-box fit: require the kernel's rectangular extent from (topLeftRow, topLeftCol)
@@ -1002,10 +1002,11 @@ static vector<pair<int, int>> buildSnakePathTopLeftForPattern(const vector<strin
 }
 
 // BFS within a window. (topLeftRow, topLeftCol) is the kernel's top-left; it may be a hole.
-static void exploreWindowTopLeft(StateType startState, int topLeftRow, int topLeftCol, vector<StateType> &newStates,
-                                 int &bestScore, StateType &bestState, long long &explored,
-                                 ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
-                                 int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
+static void
+exploreWindowTopLeft(StateType startState, int topLeftRow, int topLeftCol, vector<StateType> &newStates, int &bestScore,
+                     StateType &bestState, long long &explored,
+                     ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
+                     int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
   int r0 = topLeftRow, c0 = topLeftCol;
   KernelSize k = getKernelSize();
   const auto &pat = WINDOW_KERNEL_PATTERN;
@@ -1024,16 +1025,16 @@ static void exploreWindowTopLeft(StateType startState, int topLeftRow, int topLe
   printGridWithWindow(windowPositions);
   cout << "\n" << flush;
 
-  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored,
-                   bestCanonicalStates, maxBestStates);
+  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored, bestCanonicalStates,
+                   maxBestStates);
 }
 
 // Top-left exploration with the kernel rotated 90 degrees clockwise.
-static void exploreWindowTopLeftRotated(StateType startState, int topLeftRow, int topLeftCol,
-                                        vector<StateType> &newStates, int &bestScore, StateType &bestState,
-                                        long long &explored,
-                                        ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
-                                        int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
+static void exploreWindowTopLeftRotated(
+    StateType startState, int topLeftRow, int topLeftCol, vector<StateType> &newStates, int &bestScore,
+    StateType &bestState, long long &explored,
+    ankerl::unordered_dense::set<StateType, StateHash, StateEqual> *bestCanonicalStates = nullptr,
+    int maxBestStates = SLIDING_WINDOW_MAX_BEST_STATES) {
   int r0 = topLeftRow, c0 = topLeftCol;
   const auto &pat = getWindowKernelPatternRotated90();
   KernelSize k;
@@ -1056,8 +1057,8 @@ static void exploreWindowTopLeftRotated(StateType startState, int topLeftRow, in
   printGridWithWindow(windowPositions);
   cout << "\n" << flush;
 
-  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored,
-                   bestCanonicalStates, maxBestStates);
+  exploreWindowBfs(startState, windowPositions, newStates, bestScore, bestState, explored, bestCanonicalStates,
+                   maxBestStates);
 }
 
 static SearchResult runSlidingWindow() {
@@ -1090,8 +1091,8 @@ static SearchResult runSlidingWindow() {
   string prefix = "";
   if (std::filesystem::current_path().filename() == "build")
     prefix = "../";
-  string bestStatesFilename =
-      prefix + "best_states/level" + to_string(getCurrentLevel()) + "_type" + to_string(getCurrentUnlockedType()) + ".txt";
+  string bestStatesFilename = prefix + "best_states/level" + to_string(getCurrentLevel()) + "_type" +
+                              to_string(getCurrentUnlockedType()) + ".txt";
   std::filesystem::create_directories(std::filesystem::path(bestStatesFilename).parent_path());
   int fileBestScore = -1;
   vector<BestStateEntry> fileEntries;
@@ -1135,8 +1136,8 @@ static SearchResult runSlidingWindow() {
         auto [cr, cc] = GRID.positions[posIdx];
 
         auto t0 = chrono::steady_clock::now();
-        exploreWindowCenter(currentState, posIdx, exploredStates, bestScore, bestState, explored,
-                            &bestCanonicalStates, SLIDING_WINDOW_MAX_BEST_STATES);
+        exploreWindowCenter(currentState, posIdx, exploredStates, bestScore, bestState, explored, &bestCanonicalStates,
+                            SLIDING_WINDOW_MAX_BEST_STATES);
         auto t1 = chrono::steady_clock::now();
         auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
 
@@ -1172,8 +1173,8 @@ static SearchResult runSlidingWindow() {
           posIdx = itIdx->second;
 
         auto t0 = chrono::steady_clock::now();
-        exploreWindowTopLeft(currentState, r0, c0, exploredStates, bestScore, bestState, explored,
-                             &bestCanonicalStates, SLIDING_WINDOW_MAX_BEST_STATES);
+        exploreWindowTopLeft(currentState, r0, c0, exploredStates, bestScore, bestState, explored, &bestCanonicalStates,
+                             SLIDING_WINDOW_MAX_BEST_STATES);
         auto t1 = chrono::steady_clock::now();
         auto ms = chrono::duration_cast<chrono::milliseconds>(t1 - t0).count();
 
@@ -1435,8 +1436,8 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
     string prefix = "";
     if (std::filesystem::current_path().filename() == "build")
       prefix = "../";
-    string bestStatesFilename =
-        prefix + "best_states/level" + to_string(getCurrentLevel()) + "_type" + to_string(getCurrentUnlockedType()) + ".txt";
+    string bestStatesFilename = prefix + "best_states/level" + to_string(getCurrentLevel()) + "_type" +
+                                to_string(getCurrentUnlockedType()) + ".txt";
     std::filesystem::create_directories(std::filesystem::path(bestStatesFilename).parent_path());
     StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
     vector<BestStateEntry> toWrite;
