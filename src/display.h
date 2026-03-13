@@ -10,7 +10,7 @@
 
 #include "config.h"
 #include "grid_config.h"
-#include "state_utils.h"
+#include "search_impl.h"
 
 // Format integer with space thousands separators (e.g. 1234567 -> "1 234 567")
 inline std::string formatNum(size_t n) {
@@ -271,7 +271,7 @@ inline const string &fgColor(int t, bool placed) { return placed ? FG_COLORS[t] 
 
 // ── Grid display ─────────────────────────────────────────────────────────────
 
-inline void printGrid(StateType s, std::ostream& out = std::cout) {
+inline void printGrid(StateType s, std::ostream &out = std::cout) {
   for (int r = 0; r < GRID.rows; r++) {
     pair<int, int> firstCoord = {r, 0};
     if (GRID.coordToIdx.count(firstCoord)) {
@@ -382,13 +382,20 @@ inline void printGridWithWindow(const std::vector<int> &windowPositionIndices) {
   for (int idx : windowPositionIndices) {
     if (idx >= 0 && idx < GRID.numPositions()) {
       int r = GRID.positions[idx].first, c = GRID.positions[idx].second;
-      if (r < minR) minR = r;
-      if (r > maxR) maxR = r;
-      if (c < minC) minC = c;
-      if (c > maxC) maxC = c;
+      if (r < minR)
+        minR = r;
+      if (r > maxR)
+        maxR = r;
+      if (c < minC)
+        minC = c;
+      if (c > maxC)
+        maxC = c;
     }
   }
-  if (minR > maxR) { minR = maxR = 0; minC = maxC = 0; }
+  if (minR > maxR) {
+    minR = maxR = 0;
+    minC = maxC = 0;
+  }
 
   // Buffer: R rows x W cols; each cell is one output unit (space or box char)
   std::vector<std::vector<std::string>> buf(R, std::vector<std::string>(W, ""));
@@ -410,17 +417,17 @@ inline void printGridWithWindow(const std::vector<int> &windowPositionIndices) {
 
   // Window bounding box: BLOCK_BOX[0..7] — corners + upper, lower, right, left
   int x0 = 2 * minC, x1 = 2 * maxC + 1;
-  setBox(minR, x0, BLOCK_BOX[0].c_str());   // top-left
-  setBox(minR, x1, BLOCK_BOX[1].c_str());   // top-right
-  setBox(maxR, x0, BLOCK_BOX[2].c_str());   // bottom-left
-  setBox(maxR, x1, BLOCK_BOX[3].c_str());   // bottom-right
+  setBox(minR, x0, BLOCK_BOX[0].c_str()); // top-left
+  setBox(minR, x1, BLOCK_BOX[1].c_str()); // top-right
+  setBox(maxR, x0, BLOCK_BOX[2].c_str()); // bottom-left
+  setBox(maxR, x1, BLOCK_BOX[3].c_str()); // bottom-right
   for (int x = x0 + 1; x < x1; x++) {
-    setBox(minR, x, BLOCK_BOX[4].c_str());  // upper (top edge)
-    setBox(maxR, x, BLOCK_BOX[5].c_str());  // lower (bottom edge)
+    setBox(minR, x, BLOCK_BOX[4].c_str()); // upper (top edge)
+    setBox(maxR, x, BLOCK_BOX[5].c_str()); // lower (bottom edge)
   }
   for (int r = minR + 1; r < maxR; r++) {
-    setBox(r, x0, BLOCK_BOX[7].c_str());   // left
-    setBox(r, x1, BLOCK_BOX[6].c_str());   // right
+    setBox(r, x0, BLOCK_BOX[7].c_str()); // left
+    setBox(r, x1, BLOCK_BOX[6].c_str()); // right
   }
 
   // Grid = checkerboard of two backgrounds; box = foreground on top
@@ -433,9 +440,9 @@ inline void printGridWithWindow(const std::vector<int> &windowPositionIndices) {
         const std::string &bg = GRID_BG[(r + tileCol) % 2];
         std::cout << bg;
         if (!cell.empty())
-          std::cout << cell;  // box char in foreground
+          std::cout << cell; // box char in foreground
         else
-          std::cout << " ";   // grid tile, no box
+          std::cout << " "; // grid tile, no box
         std::cout << RESET;
       } else {
         if (!cell.empty())
@@ -451,7 +458,7 @@ inline void printGridWithWindow(const std::vector<int> &windowPositionIndices) {
 
 // printGrid with placed mask: bit i=1 means position i has been explicitly
 // built. Unplaced positions (bit=0, type=0) are rendered as dark empty cells.
-inline void printGrid(StateType s, uint64_t placedMask, std::ostream& out = std::cout) {
+inline void printGrid(StateType s, uint64_t placedMask, std::ostream &out = std::cout) {
   for (int r = 0; r < GRID.rows; r++) {
     pair<int, int> firstCoord = {r, 0};
     if (GRID.coordToIdx.count(firstCoord)) {

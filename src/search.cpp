@@ -19,7 +19,6 @@
 #include "search_bfs.h"
 #include "search_dfs.h"
 #include "search_impl.h"
-#include "state_utils.h"
 #include "transition.h"
 
 using namespace std;

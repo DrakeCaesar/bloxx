@@ -4,7 +4,6 @@
 // search_bfs.cpp. Globals are declared here and defined in search.cpp.
 
 #include "config.h"
-#include "state_utils.h"
 #include "transition.h"
 
 #include <ankerl/unordered_dense.h>
@@ -22,6 +21,20 @@ extern StateType g_baseState;
 extern const uint32_t g_requiredMask[6];
 extern int g_numSymm;
 extern int g_symmPerm[8][49];
+
+// ════════════════════════════════════════════════════════════════════════════
+// State packing utilities
+// ════════════════════════════════════════════════════════════════════════════
+// Each position stores a value 0-5 (0=empty, 1-5=tower types, fits in 3 bits).
+// Up to 21 positions × 3 bits = 63 bits → fits in uint64_t.
+
+inline StateType stateSet(StateType s, int pos, int val) {
+  s &= ~(StateType(7) << (pos * 3));
+  s |= StateType(val) << (pos * 3);
+  return s;
+}
+
+inline int stateGet(StateType s, int pos) { return (s >> (pos * 3)) & 7; }
 
 // ── Packed-transition embedding ─────────────────────────────────────────────
 static constexpr uint64_t PACKED_HI_SHIFT = 56;
