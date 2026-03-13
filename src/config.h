@@ -97,6 +97,8 @@ using StateType128 = uint128_simd;
 // 0 = BFS, 1 = Sliding Window + path reconstruction, 2 = DFS (depth-limited,
 // visited set + path stack), 3 = Sliding window only (no reverse BFS)
 [[maybe_unused]] const int SEARCH_MODE = 0;
+// BFS mode only: number of threads for layer-parallel expansion (1 = serial).
+const int BFS_NUM_THREADS = 8;
 // DFS mode only: max depth for depth-limited DFS
 const int DFS_MAX_DEPTH = 17;
 

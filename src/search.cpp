@@ -5,7 +5,10 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <optional>
+#include <shared_mutex>
 #include <string>
+#include <thread>
 #include <vector>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -370,14 +373,67 @@ static void printExpandedPath(const vector<pair<int, int>> &expandedSteps, State
   out << "\nReached score: " << reachedScore << "\n";
 }
 
+// Sharded visited set: concurrent reads (find) under shared_mutex, exclusive writes (emplace).
+// Most lookups find the state already present; only the rare insert holds the unique lock.
+static constexpr int VISITED_NUM_SHARDS = 64;
+
 template <typename S>
-inline void printBuildPath(StateType bestState,
-                           const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &visited,
-                           ostream &out = cout) {
+struct ShardedVisitedSet {
+  using Set = ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>>;
+  using Hash = StorageHash<S>;
+  struct Shard {
+    mutable std::shared_mutex mu;
+    Set set;
+  };
+  vector<Shard> shards;
+
+  ShardedVisitedSet() : shards(VISITED_NUM_SHARDS) {}
+
+  // Check under shared lock; if missing, take unique lock and insert. Returns true if we inserted.
+  bool tryEmplace(S key) {
+    size_t h = Hash{}(key);
+    size_t idx = h % VISITED_NUM_SHARDS;
+    Shard &sh = shards[idx];
+    {
+      std::shared_lock lock(sh.mu);
+      if (sh.set.find(key) != sh.set.end())
+        return false;
+    }
+    std::unique_lock lock(sh.mu);
+    return sh.set.emplace(std::move(key)).second;
+  }
+
+  // Read-only lookup; many threads can find concurrently.
+  std::optional<S> find(const S &key) const {
+    size_t h = Hash{}(key);
+    size_t idx = h % VISITED_NUM_SHARDS;
+    const Shard &sh = shards[idx];
+    std::shared_lock lock(sh.mu);
+    auto it = sh.set.find(key);
+    if (it == sh.set.end())
+      return std::nullopt;
+    return *it;
+  }
+
+  size_t size() const {
+    size_t total = 0;
+    for (const Shard &sh : shards) {
+      std::shared_lock lock(sh.mu);
+      total += sh.set.size();
+    }
+    return total;
+  }
+};
+
+template <typename S>
+inline void printBuildPath(StateType bestState, const ShardedVisitedSet<S> &visited, ostream &out = cout) {
   vector<pair<int, int>> steps; // (pos, newType) — pos in state *before* the move
   StateType cur = bestState;
   while (true) {
-    auto tr = storageTrans<S>(*visited.find(toStorageKey<S>(cur)));
+    auto opt = visited.find(toStorageKey<S>(cur));
+    if (!opt)
+      break;
+    auto tr = storageTrans<S>(*opt);
     if (tr.getPos() == -1)
       break;
     int childPos = tr.getPos();
@@ -409,16 +465,14 @@ inline void printBuildPath(StateType bestState,
 
 // Return path (steps) from start to target using the BFS visited set. Empty if target not in visited.
 template <typename S>
-static vector<pair<int, int>>
-getPathFromVisited(StateType target,
-                   const ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> &visited) {
+static vector<pair<int, int>> getPathFromVisited(StateType target, const ShardedVisitedSet<S> &visited) {
   vector<pair<int, int>> steps;
   StateType cur = target;
   while (true) {
-    auto it = visited.find(toStorageKey<S>(cur));
-    if (it == visited.end())
+    auto opt = visited.find(toStorageKey<S>(cur));
+    if (!opt)
       return {};
-    auto tr = storageTrans<S>(*it);
+    auto tr = storageTrans<S>(*opt);
     if (tr.getPos() == -1)
       break;
     int childPos = tr.getPos();
@@ -1408,55 +1462,159 @@ static SearchResult runSlidingWindow() {
 // levels 3+.  Populates result and writes path reconstruction to cout (which
 // may be redirected to the baseline file by the caller).
 template <typename S> static void runBFSSearch(SearchResult &result) {
-  ankerl::unordered_dense::segmented_set<S, StorageHash<S>, StorageEqual<S>> visited;
+  ShardedVisitedSet<S> visited;
 
   struct Entry {
     StateType state;
     int score;
   };
   vector<Entry> q;
-  size_t head = 0;
+  size_t layerBegin = 0;
+  size_t layerEnd = 0;
 
   StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
   int startScore = scoreGrid(startState);
-  visited.emplace(encodeForStorage<S>(startState, {})); // sentinel: no parent
+  (void)visited.tryEmplace(encodeForStorage<S>(startState, {})); // sentinel: no parent
   q.push_back({startState, startScore});
+  layerEnd = 1;
 
   result.bestState = startState;
   result.bestScore = startScore;
   result.explored = 0;
   ankerl::unordered_dense::set<StateType, StateHash, StateEqual> bestCanonicalStates;
 
-  while (head < q.size()) {
-    auto [cur, curScore] = q[head++];
-    result.explored++;
+  const int numThreads = (BFS_NUM_THREADS >= 1) ? BFS_NUM_THREADS : 1;
 
-    if (curScore > result.bestScore) {
-      result.bestScore = curScore;
-      result.bestState = cur;
-      bestCanonicalStates.clear();
-      bestCanonicalStates.insert(canonical(cur));
-      cout << "New best score: " << result.bestScore << "\n";
-      printGrid(cur);
-    } else if (curScore == result.bestScore) {
-      bestCanonicalStates.insert(canonical(cur));
-    }
+  while (layerBegin < layerEnd) {
+    const size_t layerSize = layerEnd - layerBegin;
 
-    for (int pos = 0; pos < g_numPos; pos++) {
-      int curType = stateGet(cur, pos);
-      uint32_t present = neighborPresent(cur, pos);
-      for (int newType = 0; newType <= g_maxType[pos]; newType++) {
-        if (!FORWARD_TRANSITIONS[curType][newType])
+    if (numThreads <= 1) {
+      // Serial: process current layer and push children to q
+      for (size_t i = layerBegin; i < layerEnd; i++) {
+        StateType cur = q[i].state;
+        int curScore = q[i].score;
+        result.explored++;
+        if (curScore > result.bestScore) {
+          result.bestScore = curScore;
+          result.bestState = cur;
+          bestCanonicalStates.clear();
+          bestCanonicalStates.insert(canonical(cur));
+          cout << "New best score: " << result.bestScore << "\n";
+          printGrid(cur);
+        } else if (curScore == result.bestScore && (int)bestCanonicalStates.size() < BFS_MAX_BEST_STATES) {
+          bestCanonicalStates.insert(canonical(cur));
+        }
+        for (int pos = 0; pos < g_numPos; pos++) {
+          int curType = stateGet(cur, pos);
+          uint32_t present = neighborPresent(cur, pos);
+          for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+            if (!FORWARD_TRANSITIONS[curType][newType])
+              continue;
+            if (!canPlace(present, newType))
+              continue;
+            auto [next, childPos] = canonicalAndChildPos(stateSet(cur, pos, newType), pos);
+            int nextScore = curScore + (newType - curType);
+            if (visited.tryEmplace(encodeForStorage<S>(next, Transition{(int8_t)childPos, (int8_t)curType})))
+              q.push_back({next, nextScore});
+          }
+        }
+      }
+    } else {
+      // Parallel: each thread processes a chunk of the layer, writes to thread-local buffer
+      int prevBestScore = result.bestScore;
+      vector<vector<Entry>> nextLocal(static_cast<size_t>(numThreads));
+      vector<int> localBestScore(static_cast<size_t>(numThreads), result.bestScore);
+      vector<StateType> localBestState(static_cast<size_t>(numThreads), result.bestState);
+      vector<ankerl::unordered_dense::set<StateType, StateHash, StateEqual>> localBestCanon(static_cast<size_t>(numThreads));
+
+      vector<thread> workers;
+      for (int t = 0; t < numThreads; t++) {
+        workers.emplace_back([&, t]() {
+          const size_t n = layerSize;
+          const size_t start = layerBegin + (n * static_cast<size_t>(t) / static_cast<size_t>(numThreads));
+          const size_t end = layerBegin + (n * (static_cast<size_t>(t) + 1) / static_cast<size_t>(numThreads));
+          vector<Entry> &myNext = nextLocal[static_cast<size_t>(t)];
+          int &myBestScore = localBestScore[static_cast<size_t>(t)];
+          StateType &myBestState = localBestState[static_cast<size_t>(t)];
+          auto &myBestCanon = localBestCanon[static_cast<size_t>(t)];
+          myBestState = result.bestState;
+          myBestScore = result.bestScore;
+          for (size_t i = start; i < end; i++) {
+            StateType cur = q[i].state;
+            int curScore = q[i].score;
+            if (curScore > myBestScore) {
+              myBestScore = curScore;
+              myBestState = cur;
+              myBestCanon.clear();
+              myBestCanon.insert(canonical(cur));
+            } else if (curScore == myBestScore && (int)myBestCanon.size() < BFS_MAX_BEST_STATES) {
+              myBestCanon.insert(canonical(cur));
+            }
+            for (int pos = 0; pos < g_numPos; pos++) {
+              int curType = stateGet(cur, pos);
+              uint32_t present = neighborPresent(cur, pos);
+              for (int newType = 0; newType <= g_maxType[pos]; newType++) {
+                if (!FORWARD_TRANSITIONS[curType][newType])
+                  continue;
+                if (!canPlace(present, newType))
+                  continue;
+                auto [next, childPos] = canonicalAndChildPos(stateSet(cur, pos, newType), pos);
+                int nextScore = curScore + (newType - curType);
+                if (visited.tryEmplace(encodeForStorage<S>(next, Transition{(int8_t)childPos, (int8_t)curType})))
+                  myNext.push_back({next, nextScore});
+              }
+            }
+          }
+        });
+      }
+      for (thread &w : workers)
+        w.join();
+
+      result.explored += layerSize;
+
+      // Merge best score/state; fill bestCanonicalStates from thread locals up to BFS_MAX_BEST_STATES
+      int globalBest = result.bestScore;
+      for (int t = 0; t < numThreads; t++)
+        if (localBestScore[static_cast<size_t>(t)] > globalBest)
+          globalBest = localBestScore[static_cast<size_t>(t)];
+      if (globalBest > result.bestScore)
+        bestCanonicalStates.clear();
+      result.bestScore = globalBest;
+      bool setState = false;
+      for (int t = 0; t < numThreads; t++) {
+        if (localBestScore[static_cast<size_t>(t)] != globalBest)
           continue;
-        if (!canPlace(present, newType))
-          continue;
+        if (!setState) {
+          result.bestState = localBestState[static_cast<size_t>(t)];
+          setState = true;
+        }
+        for (const StateType &s : localBestCanon[static_cast<size_t>(t)]) {
+          if ((int)bestCanonicalStates.size() >= BFS_MAX_BEST_STATES)
+            break;
+          bestCanonicalStates.insert(s);
+        }
+        if ((int)bestCanonicalStates.size() >= BFS_MAX_BEST_STATES)
+          break;
+      }
+      if (result.bestScore > prevBestScore) {
+        cout << "New best score: " << result.bestScore << "\n";
+        printGrid(result.bestState);
+      }
 
-        auto [next, childPos] = canonicalAndChildPos(stateSet(cur, pos, newType), pos);
-        int nextScore = curScore + (newType - curType);
-        if (visited.emplace(encodeForStorage<S>(next, Transition{(int8_t)childPos, (int8_t)curType})).second)
-          q.push_back({next, nextScore});
+      // Stitch thread-local queues into q (no extra copy of entries)
+      size_t totalNext = 0;
+      for (int t = 0; t < numThreads; t++)
+        totalNext += nextLocal[static_cast<size_t>(t)].size();
+      q.reserve(q.size() + totalNext);
+      for (int t = 0; t < numThreads; t++) {
+        vector<Entry> &buf = nextLocal[static_cast<size_t>(t)];
+        for (Entry &e : buf)
+          q.push_back(std::move(e));
       }
     }
+
+    layerBegin = layerEnd;
+    layerEnd = q.size();
 
     if (result.explored % 2000000 == 0)
       cout << "Explored: " << result.explored << " | Visited: " << visited.size() << " | Best: " << result.bestScore
@@ -1464,6 +1622,9 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
   }
 
   result.uniqueStates = visited.size();
+
+  if (bestCanonicalStates.empty())
+    bestCanonicalStates.insert(canonical(result.bestState));
 
   // Write all states at best score (collected during BFS) to best_states file (with paths from BFS).
   {
