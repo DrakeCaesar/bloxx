@@ -28,10 +28,14 @@ extern int g_symmPerm[8][49];
 // Each position stores a value 0-5 (0=empty, 1-5=tower types, fits in 3 bits).
 // Up to 21 positions × 3 bits = 63 bits → fits in uint64_t.
 
+// Precomputed masks (defined in search.cpp, sized for 49 max positions):
+// clearMask[pos]  = all 1s except the 3 bits for pos are 0.
+// setMask[pos][v] = only the 3 bits for pos set to v (0..5).
+extern StateType g_stateClearMask[49];
+extern StateType g_stateSetMask[49][6];
+
 inline StateType stateSet(StateType s, int pos, int val) {
-  s &= ~(StateType(7) << (pos * 3));
-  s |= StateType(val) << (pos * 3);
-  return s;
+  return (s & g_stateClearMask[pos]) | g_stateSetMask[pos][val];
 }
 
 inline int stateGet(StateType s, int pos) { return (s >> (pos * 3)) & 7; }
@@ -124,6 +128,7 @@ inline int countTowersLeft(StateType s) {
   return towersLeft;
 }
 
+// Apply a single permutation (used in non-hot paths and for diagnostics).
 inline StateType applyPerm(StateType s, const int *perm) {
   StateType result = 0;
   StateType remaining = s;
@@ -134,15 +139,29 @@ inline StateType applyPerm(StateType s, const int *perm) {
   return result;
 }
 
+// Build all symmetric variants of a state in one pass.
+inline void buildAllSymmetricStates(StateType s, StateType out[8]) {
+  for (int k = 0; k < g_numSymm; k++)
+    out[k] = StateType(0);
+  for (int i = 0; i < g_numPos; i++) {
+    int v = stateGet(s, i);
+    for (int k = 0; k < g_numSymm; k++)
+      out[k] = stateSet(out[k], g_symmPerm[k][i], v);
+  }
+}
+
 inline StateType canonical(StateType s) {
   if (g_numSymm == 1)
     return s;
-  StateType best = s;
+  StateType states[8];
+  buildAllSymmetricStates(s, states);
+  StateType best = states[0];
   for (int k = 1; k < g_numSymm; k++) {
-    StateType t = applyPerm(s, g_symmPerm[k]);
-    best = (t < best) ? t : best;
-    if (best == g_baseState)
-      return g_baseState;
+    if (states[k] < best) {
+      best = states[k];
+      if (best == g_baseState)
+        return g_baseState;
+    }
   }
   return best;
 }
@@ -150,16 +169,17 @@ inline StateType canonical(StateType s) {
 inline std::pair<StateType, int> canonicalAndChildPos(StateType s, int pos) {
   if (g_numSymm == 1)
     return {s, pos};
-  StateType best = s;
+  StateType states[8];
+  buildAllSymmetricStates(s, states);
+  StateType best = states[0];
   int bestK = 0;
   for (int k = 1; k < g_numSymm; k++) {
-    StateType t = applyPerm(s, g_symmPerm[k]);
-    if (t < best) {
-      best = t;
+    if (states[k] < best) {
+      best = states[k];
       bestK = k;
+      if (best == g_baseState)
+        break;
     }
-    if (best == g_baseState)
-      break;
   }
   return {best, g_symmPerm[bestK][pos]};
 }

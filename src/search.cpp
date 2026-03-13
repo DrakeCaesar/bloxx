@@ -38,6 +38,8 @@ StateType g_baseState;
 const uint32_t g_requiredMask[6] = {0, 0, 2, 6, 14, 30};
 int g_numSymm;
 int g_symmPerm[8][49];
+StateType g_stateClearMask[49];
+StateType g_stateSetMask[49][6];
 
 static void buildSymmetries() {
   int R = GRID.rows, C = GRID.cols;
@@ -90,6 +92,18 @@ static void buildLookupTables() {
     for (int j = count; j < 4; j++)
       g_neighborShifts[i][j] = 63; // safe padding: reads always-zero bits
   }
+
+  // Precompute state masks for fast stateSet.
+  for (int i = 0; i < g_numPos; i++) {
+    // Clear mask: all bits 1 except this position's 3 bits are 0.
+    StateType mask = StateType(0);
+    mask = ~(StateType(7) << (i * 3));
+    g_stateClearMask[i] = mask;
+    // Set masks for values 0..5.
+    for (int v = 0; v <= 5; v++)
+      g_stateSetMask[i][v] = StateType(v) << (i * 3);
+  }
+
   g_baseState = StateType(0);
   for (int i = 0; i < g_numPos; i++)
     g_baseState = stateSet(g_baseState, i, 1);
