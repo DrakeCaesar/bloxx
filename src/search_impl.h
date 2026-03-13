@@ -21,6 +21,7 @@ extern StateType g_baseState;
 extern const uint32_t g_requiredMask[6];
 extern int g_numSymm;
 extern int g_symmPerm[8][49];
+extern int g_symmPermInv[8][49];
 
 // ════════════════════════════════════════════════════════════════════════════
 // State packing utilities
@@ -139,77 +140,80 @@ inline StateType applyPerm(StateType s, const int *perm) {
   return result;
 }
 
-// Build all symmetric variants of a state in one pass.
-inline void buildAllSymmetricStates(StateType s, StateType out[8]) {
-  // We only ever use 4- or 8-way symmetry; specialize for those counts.
+// Choose the symmetry whose transformed state is lexicographically smallest
+// when states are compared by tower type at canonical positions 0..g_numPos-1.
+// Always 4 or 8 symmetries; branches unrolled for 4 and 8.
+inline int chooseBestSymmetry(StateType s) {
   if (g_numSymm == 4) {
-    out[0] = StateType(0);
-    out[1] = StateType(0);
-    out[2] = StateType(0);
-    out[3] = StateType(0);
-    for (int i = 0; i < g_numPos; i++) {
-      int v = stateGet(s, i);
-      out[0] = stateSet(out[0], g_symmPerm[0][i], v);
-      out[1] = stateSet(out[1], g_symmPerm[1][i], v);
-      out[2] = stateSet(out[2], g_symmPerm[2][i], v);
-      out[3] = stateSet(out[3], g_symmPerm[3][i], v);
+    int cand[4] = {0, 1, 2, 3};
+    int candCount = 4;
+    for (int canonPos = 0; canonPos < g_numPos && candCount > 1; ++canonPos) {
+      int bestVal = 6;
+      for (int idx = 0; idx < 4; ++idx) {
+        if (idx >= candCount)
+          continue;
+        int v = stateGet(s, g_symmPermInv[cand[idx]][canonPos]);
+        if (v < bestVal)
+          bestVal = v;
+      }
+      int write = 0;
+      for (int idx = 0; idx < 4; ++idx) {
+        if (idx >= candCount)
+          continue;
+        int k = cand[idx];
+        if (stateGet(s, g_symmPermInv[k][canonPos]) == bestVal)
+          cand[write++] = k;
+      }
+      candCount = write;
     }
-  } else {
-    // Default: treat as 8 symmetries.
-    out[0] = StateType(0);
-    out[1] = StateType(0);
-    out[2] = StateType(0);
-    out[3] = StateType(0);
-    out[4] = StateType(0);
-    out[5] = StateType(0);
-    out[6] = StateType(0);
-    out[7] = StateType(0);
-    for (int i = 0; i < g_numPos; i++) {
-      int v = stateGet(s, i);
-      out[0] = stateSet(out[0], g_symmPerm[0][i], v);
-      out[1] = stateSet(out[1], g_symmPerm[1][i], v);
-      out[2] = stateSet(out[2], g_symmPerm[2][i], v);
-      out[3] = stateSet(out[3], g_symmPerm[3][i], v);
-      out[4] = stateSet(out[4], g_symmPerm[4][i], v);
-      out[5] = stateSet(out[5], g_symmPerm[5][i], v);
-      out[6] = stateSet(out[6], g_symmPerm[6][i], v);
-      out[7] = stateSet(out[7], g_symmPerm[7][i], v);
-    }
+    return cand[0];
   }
+  // 8 symmetries
+  int cand[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+  int candCount = 8;
+  for (int canonPos = 0; canonPos < g_numPos && candCount > 1; ++canonPos) {
+    int bestVal = 6;
+    for (int idx = 0; idx < 8; ++idx) {
+      if (idx >= candCount)
+        continue;
+      int v = stateGet(s, g_symmPermInv[cand[idx]][canonPos]);
+      if (v < bestVal)
+        bestVal = v;
+    }
+    int write = 0;
+    for (int idx = 0; idx < 8; ++idx) {
+      if (idx >= candCount)
+        continue;
+      int k = cand[idx];
+      if (stateGet(s, g_symmPermInv[k][canonPos]) == bestVal)
+        cand[write++] = k;
+    }
+    candCount = write;
+  }
+  return cand[0];
 }
 
 inline StateType canonical(StateType s) {
-  if (g_numSymm == 1)
-    return s;
-  StateType states[8];
-  buildAllSymmetricStates(s, states);
-  StateType best = states[0];
-  for (int k = 1; k < g_numSymm; k++) {
-    if (states[k] < best) {
-      best = states[k];
-      if (best == g_baseState)
-        return g_baseState;
-    }
+  int bestK = chooseBestSymmetry(s);
+  StateType result = StateType(0);
+  for (int origPos = 0; origPos < g_numPos; ++origPos) {
+    int v = stateGet(s, origPos);
+    int canonPos = g_symmPerm[bestK][origPos];
+    result = stateSet(result, canonPos, v);
   }
-  return best;
+  return result;
 }
 
 inline std::pair<StateType, int> canonicalAndChildPos(StateType s, int pos) {
-  if (g_numSymm == 1)
-    return {s, pos};
-  StateType states[8];
-  buildAllSymmetricStates(s, states);
-  StateType best = states[0];
-  int bestK = 0;
-  for (int k = 1; k < g_numSymm; k++) {
-    if (states[k] < best) {
-      best = states[k];
-      bestK = k;
-      if (best == g_baseState)
-        break;
-    }
+  int bestK = chooseBestSymmetry(s);
+  StateType best = StateType(0);
+  for (int origPos = 0; origPos < g_numPos; ++origPos) {
+    int v = stateGet(s, origPos);
+    int canonPos = g_symmPerm[bestK][origPos];
+    best = stateSet(best, canonPos, v);
   }
-  return {best, g_symmPerm[bestK][pos]};
+  int canonChildPos = g_symmPerm[bestK][pos];
+  return {best, canonChildPos};
 }
 
 inline uint32_t neighborPresent(StateType state, int pos) {

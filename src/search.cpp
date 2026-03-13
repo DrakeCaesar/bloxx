@@ -38,6 +38,7 @@ StateType g_baseState;
 const uint32_t g_requiredMask[6] = {0, 0, 2, 6, 14, 30};
 int g_numSymm;
 int g_symmPerm[8][49];
+int g_symmPermInv[8][49];
 StateType g_stateClearMask[49];
 StateType g_stateSetMask[49][6];
 
@@ -71,11 +72,31 @@ static void buildSymmetries() {
       else
         perm[i] = it->second;
     }
-    if (valid) {
-      for (int i = 0; i < g_numPos; i++)
-        g_symmPerm[g_numSymm][i] = perm[i];
-      g_numSymm++;
+    if (!valid)
+      continue;
+
+    // Deduplicate: skip transforms whose permutation matches an existing one.
+    bool duplicate = false;
+    for (int k = 0; k < g_numSymm && !duplicate; ++k) {
+      bool same = true;
+      for (int i = 0; i < g_numPos; ++i) {
+        if (g_symmPerm[k][i] != perm[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same)
+        duplicate = true;
     }
+    if (duplicate)
+      continue;
+
+    for (int i = 0; i < g_numPos; i++) {
+      int j = perm[i];
+      g_symmPerm[g_numSymm][i] = j;
+      g_symmPermInv[g_numSymm][j] = i;
+    }
+    g_numSymm++;
   }
   // (symmetry count intentionally not printed; keep output compact)
 }
