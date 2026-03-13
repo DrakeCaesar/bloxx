@@ -141,12 +141,40 @@ inline StateType applyPerm(StateType s, const int *perm) {
 
 // Build all symmetric variants of a state in one pass.
 inline void buildAllSymmetricStates(StateType s, StateType out[8]) {
-  for (int k = 0; k < g_numSymm; k++)
-    out[k] = StateType(0);
-  for (int i = 0; i < g_numPos; i++) {
-    int v = stateGet(s, i);
-    for (int k = 0; k < g_numSymm; k++)
-      out[k] = stateSet(out[k], g_symmPerm[k][i], v);
+  // We only ever use 4- or 8-way symmetry; specialize for those counts.
+  if (g_numSymm == 4) {
+    out[0] = StateType(0);
+    out[1] = StateType(0);
+    out[2] = StateType(0);
+    out[3] = StateType(0);
+    for (int i = 0; i < g_numPos; i++) {
+      int v = stateGet(s, i);
+      out[0] = stateSet(out[0], g_symmPerm[0][i], v);
+      out[1] = stateSet(out[1], g_symmPerm[1][i], v);
+      out[2] = stateSet(out[2], g_symmPerm[2][i], v);
+      out[3] = stateSet(out[3], g_symmPerm[3][i], v);
+    }
+  } else {
+    // Default: treat as 8 symmetries.
+    out[0] = StateType(0);
+    out[1] = StateType(0);
+    out[2] = StateType(0);
+    out[3] = StateType(0);
+    out[4] = StateType(0);
+    out[5] = StateType(0);
+    out[6] = StateType(0);
+    out[7] = StateType(0);
+    for (int i = 0; i < g_numPos; i++) {
+      int v = stateGet(s, i);
+      out[0] = stateSet(out[0], g_symmPerm[0][i], v);
+      out[1] = stateSet(out[1], g_symmPerm[1][i], v);
+      out[2] = stateSet(out[2], g_symmPerm[2][i], v);
+      out[3] = stateSet(out[3], g_symmPerm[3][i], v);
+      out[4] = stateSet(out[4], g_symmPerm[4][i], v);
+      out[5] = stateSet(out[5], g_symmPerm[5][i], v);
+      out[6] = stateSet(out[6], g_symmPerm[6][i], v);
+      out[7] = stateSet(out[7], g_symmPerm[7][i], v);
+    }
   }
 }
 
