@@ -101,7 +101,7 @@ using StateType128 = uint128_simd;
 const int DFS_MAX_DEPTH = 17;
 
 // Baseline generation: generate baselines for unlocked types in this range
-const int UNLOCKED_TYPE_START = 5; // First type to generate baseline for
+const int UNLOCKED_TYPE_START = 1; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
