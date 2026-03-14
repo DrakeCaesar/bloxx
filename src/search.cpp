@@ -20,7 +20,6 @@
 #include "grid_config.h"
 #include "search.h"
 #include "search_bfs.h"
-#include "search_dfs.h"
 #include "search_impl.h"
 #include "transition.h"
 
@@ -139,80 +138,6 @@ int scoreGrid(StateType state) {
   for (int i = 0; i < g_numPos; i++)
     score += stateGet(state, i);
   return score;
-}
-
-// expandPathForEmptyBoard: converts a path from the solver's "all-1 = blue"
-// model to a path that starts from a truly empty board.
-//
-// For each step (pos, newType), before we can upgrade pos, we need:
-//   1. pos itself to be explicitly placed (as blue) if not already
-//   2. For each required neighbor type 1..newType-1, at least one neighbor
-//      must be explicitly placed with that type.
-//      - Neighbors with type > 1 were placed by earlier explicit steps.
-//      - Neighbors with type == 1 are "implicit blue" and need an explicit
-//        "place blue" step inserted here.
-//
-// Tracks a physical (non-canonical) state so neighbor lookups against
-// GRID.neighbors[] remain consistent with position indices.
-static vector<pair<int, int>> expandPathForEmptyBoard(const vector<pair<int, int>> &steps) {
-  vector<pair<int, int>> out;
-  out.reserve(steps.size() * 2);
-  uint64_t placed = 0; // bit i = physical position i has been explicitly placed
-
-  // Track both states exactly like printExpandedPath does.
-  StateType canonState = g_baseState;
-  StateType physState = g_baseState;
-
-  for (auto [pos, newType] : steps) {
-    // Find which symmetry maps physState to its canonical form.
-    int usedSymm = 0;
-    for (int k = 0; k < g_numSymm; k++) {
-      if (applyPerm(physState, g_symmPerm[k]) == canonState) {
-        usedSymm = k;
-        break;
-      }
-    }
-    // perm[i]    = canonical position of physical position i
-    // invPerm[j] = physical position of canonical position j
-    int invPerm[49];
-    for (int i = 0; i < g_numPos; i++)
-      invPerm[g_symmPerm[usedSymm][i]] = i;
-    int physPos = invPerm[pos];
-
-    // For each required neighbor type req in 1..newType-1, ensure at least one
-    // placed physical neighbor has that type. Unplaced neighbors with type 1
-    // are "implicit blue"; insert an explicit place-blue step if needed.
-    for (int req = 1; req < newType; req++) {
-      bool satisfied = false;
-      int candidatePhysNb = -1;
-      for (int physNb : GRID.neighbors[physPos]) {
-        int nbType = stateGet(physState, physNb);
-        if (nbType == req) {
-          if ((placed >> physNb) & 1) {
-            satisfied = true;
-            break;
-          } else if (req == 1) {
-            candidatePhysNb = physNb;
-          }
-        }
-      }
-      if (!satisfied && candidatePhysNb != -1) {
-        // Express the placement in canonical space for printExpandedPath.
-        // Blue placements don't change canonState (already 1), so usedSymm
-        // stays stable for this step.
-        int canonNb = g_symmPerm[usedSymm][candidatePhysNb];
-        out.push_back({canonNb, 1});
-        placed |= (1ull << candidatePhysNb);
-      }
-    }
-
-    out.push_back({pos, newType});
-    placed |= (1ull << physPos);
-    canonState = canonical(stateSet(canonState, pos, newType));
-    physState = stateSet(physState, physPos, newType);
-  }
-
-  return out;
 }
 
 // result[i] = s[perm[i]] (inverse of applyPerm for display: canon in frame k)
@@ -457,10 +382,7 @@ inline void printBuildPath(StateType bestState, const ShardedVisitedSet<S> &visi
     cur = parent;
   }
   reverse(steps.begin(), steps.end());
-  if (PATH_FROM_EMPTY)
-    printExpandedPath(steps, StateType(0), out);
-  else
-    printExpandedPath(expandPathForEmptyBoard(steps), g_baseState, out);
+  printExpandedPath(steps, StateType(0), out);
 }
 
 // Return path (steps) from start to target using the BFS visited set. Empty if target not in visited.
@@ -497,10 +419,7 @@ static vector<pair<int, int>> getPathFromVisited(StateType target, const Sharded
 }
 
 void printBuildPathSteps(const vector<pair<int, int>> &buildPath, ostream &out) {
-  if (PATH_FROM_EMPTY)
-    printExpandedPath(buildPath, StateType(0), out);
-  else
-    printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState, out);
+  printExpandedPath(buildPath, StateType(0), out);
 }
 
 // BFS from base state (all blue) stopping as soon as target is reached.
@@ -515,7 +434,7 @@ inline ankerl::unordered_dense::segmented_set<StateType, StateHash, StateEqual> 
   vector<Entry> q;
   size_t head = 0;
 
-  StateType bfsStart = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+  StateType bfsStart = StateType(0);
   path.emplace(encodeTransition(bfsStart, {})); // sentinel: packed=255
   q.push_back({bfsStart, scoreGrid(bfsStart)});
 
@@ -1151,9 +1070,10 @@ static void exploreWindowTopLeftRotated(
 
 static SearchResult runSlidingWindow() {
   s_newBestBlockLines = 0;
-  int baseScore = scoreGrid(g_baseState);
-  SearchResult result{g_baseState, baseScore, 0, 0};
-  result.bestState = g_baseState;
+  const StateType startState = StateType(0);
+  int baseScore = scoreGrid(startState);
+  SearchResult result{startState, baseScore, 0, 0};
+  result.bestState = startState;
   result.bestScore = baseScore;
   result.explored = 0;
 
@@ -1171,7 +1091,7 @@ static SearchResult runSlidingWindow() {
     int scoreAfter;
   };
 
-  StateType currentState = g_baseState;
+  StateType currentState = startState;
   int currentScore = baseScore;
   int roundNum = 0;
   ankerl::unordered_dense::set<StateType, StateHash, StateEqual> bestCanonicalStates;
@@ -1374,7 +1294,7 @@ static SearchResult runSlidingWindow() {
       if ((int)toWrite.size() > SLIDING_WINDOW_MAX_BEST_STATES)
         toWrite.resize(SLIDING_WINDOW_MAX_BEST_STATES);
 
-      StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+      StateType pathStartState = StateType(0);
       int needPath = 0;
       for (const BestStateEntry &e : toWrite)
         if (e.pathLen < 0 || RECOMPUTE_BEST_STATE_PATHS)
@@ -1428,7 +1348,7 @@ static SearchResult runSlidingWindow() {
 
   cout << "\nFinal score after " << roundNum << " round(s): " << result.bestScore << "\n" << flush;
 
-  if (SEARCH_MODE != 3) {
+  if (SEARCH_MODE != 2) {
     // ── Build path reconstruction: reverse BFS ─────────────────────────────
     printPhaseHeader("Path reconstruction (reverse BFS)");
     printOperation("Building path from goal to start", "");
@@ -1446,10 +1366,7 @@ static SearchResult runSlidingWindow() {
     }
 
     ostream &pathOut = (g_baselineFile && g_baselineFile->is_open()) ? *g_baselineFile : cout;
-    if (PATH_FROM_EMPTY)
-      printExpandedPath(buildPath, StateType(0), pathOut);
-    else
-      printExpandedPath(expandPathForEmptyBoard(buildPath), g_baseState, pathOut);
+    printExpandedPath(buildPath, StateType(0), pathOut);
 
     pathOut << "\nFinal score: " << result.bestScore << "\n";
   }
@@ -1472,7 +1389,7 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
   size_t layerBegin = 0;
   size_t layerEnd = 0;
 
-  StateType startState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+  StateType startState = StateType(0);
   int startScore = scoreGrid(startState);
   (void)visited.tryEmplace(encodeForStorage<S>(startState, {})); // sentinel: no parent
   q.push_back({startState, startScore});
@@ -1634,7 +1551,7 @@ template <typename S> static void runBFSSearch(SearchResult &result) {
     string bestStatesFilename = prefix + "best_states/level" + to_string(getCurrentLevel()) + "_type" +
                                 to_string(getCurrentUnlockedType()) + ".txt";
     std::filesystem::create_directories(std::filesystem::path(bestStatesFilename).parent_path());
-    StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
+    StateType pathStartState = StateType(0);
     vector<BestStateEntry> toWrite;
     toWrite.reserve(bestCanonicalStates.size());
     for (StateType s : bestCanonicalStates) {
@@ -1687,13 +1604,11 @@ void runSingleLevel() {
   (void)setupStart;
   (void)setupEnd;
 
-  SearchResult result{g_baseState, 0, 0, 0};
+  SearchResult result{StateType(0), 0, 0, 0};
   auto phaseStart = chrono::steady_clock::now();
 
-  if (SEARCH_MODE == 1 || SEARCH_MODE == 3) {
+  if (SEARCH_MODE == 1 || SEARCH_MODE == 2) {
     result = runSlidingWindow();
-  } else if (SEARCH_MODE == 2) {
-    runDFSSearch(result);
   } else {
     if (usesStorage64())
       runBFSSearch<uint64_t>(result);
@@ -1704,13 +1619,12 @@ void runSingleLevel() {
   auto phaseEnd = chrono::steady_clock::now();
   long long phaseMs = (long long)chrono::duration_cast<chrono::milliseconds>(phaseEnd - phaseStart).count();
   const char *phaseName =
-      (SEARCH_MODE == 1 || SEARCH_MODE == 3) ? "Sliding window" : (SEARCH_MODE == 2 ? "DFS" : "BFS");
+      (SEARCH_MODE == 1 || SEARCH_MODE == 2) ? "Sliding window" : "BFS";
   (void)phaseName;
   (void)phaseMs;
 
   cout << (SEARCH_MODE == 1   ? "\nSliding window complete.\n"
-           : SEARCH_MODE == 2 ? "\nDFS complete.\n"
-           : SEARCH_MODE == 3 ? "\nSliding window only complete (no path reconstruction).\n"
+           : SEARCH_MODE == 2 ? "\nSliding window only complete (no path reconstruction).\n"
                               : "\nBFS complete.\n");
   cout << "States explored : " << result.explored << "\n";
   cout << "Unique states   : " << result.uniqueStates << "\n";
@@ -1725,5 +1639,5 @@ void runSingleLevel() {
   cout << "Total time: " << formatTimeMs(totalMs) << "\n" << flush;
 
   // Mode 0: path already printed by runBFSSearch. Mode 1: by runSlidingWindow.
-  // Mode 2: path already printed by runDFSSearch. Mode 3: no path (sliding window only).
+  // Mode 2: no path (sliding window only).
 }

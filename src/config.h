@@ -94,21 +94,21 @@ using StateType128 = uint128_simd;
 // Configuration Constants
 // ════════════════════════════════════════════════════════════════════════════
 
-// 0 = BFS, 1 = Sliding Window + path reconstruction, 2 = DFS (depth-limited,
-// visited set + path stack), 3 = Sliding window only (no reverse BFS)
+// 0 = BFS, 1 = Sliding Window + path reconstruction, 2 = Sliding window only (no reverse BFS)
 [[maybe_unused]] const int SEARCH_MODE = 0;
 // BFS mode only: number of threads for layer-parallel expansion (1 = serial).
-const int BFS_NUM_THREADS = 8;
-// DFS mode only: max depth for depth-limited DFS
-const int DFS_MAX_DEPTH = 17;
-
+const int BFS_NUM_THREADS = 12;
+// BFS mode only: max canonical states to keep at current best score (skip when full; clear on better score).
+constexpr int BFS_MAX_BEST_STATES = 1000;
+// BFS mode only: min interval (ms) between rewritable progress line updates.
+const int BFS_STATUS_UPDATE_MS = 200;
 // Baseline generation: generate baselines for unlocked types in this range
 const int UNLOCKED_TYPE_START = 1; // First type to generate baseline for
 const int UNLOCKED_TYPE_END = 5;   // Last type to generate baseline for
 
 // Multi-level configuration
-const int LEVEL_START = 1; // First level to process
-const int LEVEL_END = 1;   // Last level to process (inclusive)
+const int LEVEL_START = 3; // First level to process
+const int LEVEL_END = 3;   // Last level to process (inclusive)
 
 // Current level being processed (for multi-level runs)
 inline int &getCurrentLevel() {
@@ -142,10 +142,6 @@ const int REVERSE_BFS_PRUNE_HIGH_DELTA = 3;
 // longer).
 const bool RUN_PARALLEL_FORWARD_BFS = false;
 
-// When true, path-finding bidirectional BFS starts from empty (all 0) instead
-// of all-blue (all 1). Can find more optimal paths (e.g. fewer placements).
-const bool PATH_FROM_EMPTY = true;
-
 // ── Transition tables ────────────────────────────────────────────────────────
 // TRANSITIONS[fromType][toType] = true if (fromType → toType) is allowed.
 // Edit these to prune transitions that are never optimal.
@@ -173,15 +169,6 @@ constexpr bool FORWARD_TRANSITIONS_SLIDING_WINDOW[6][6] = {
 };
 
 constexpr bool BACKWARD_TRANSITIONS[6][6] = {
-    /* empty  */ {0, 0, 0, 0, 0, 0},
-    /* blue   */ {0, 0, 1, 1, 1, 0},
-    /* red    */ {0, 1, 0, 1, 1, 0},
-    /* green  */ {0, 1, 1, 0, 1, 0},
-    /* yellow */ {0, 1, 1, 1, 0, 0},
-    /* white  */ {0, 1, 1, 1, 1, 0},
-};
-
-constexpr bool BACKWARD_TRANSITIONS_EMPTY[6][6] = {
     /* empty  */ {0, 0, 0, 0, 0, 0},
     /* blue   */ {1, 0, 1, 1, 1, 0},
     /* red    */ {1, 1, 0, 1, 1, 0},

@@ -121,9 +121,8 @@ inline bool usesStorage64() { return g_numPos <= 16; }
 
 inline int countTowersLeft(StateType s) {
   int towersLeft = 0;
-  int targetType = PATH_FROM_EMPTY ? 0 : 1;
   for (int pos = 0; pos < g_numPos; pos++) {
-    if (stateGet(s, pos) != targetType)
+    if (stateGet(s, pos) != 0)
       towersLeft++;
   }
   return towersLeft;

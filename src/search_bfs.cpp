@@ -144,7 +144,7 @@ template <typename S>
 static void reverseExpandChunkImpl(const QueueEntry *start, const QueueEntry *end,
                                    std::vector<ReverseExpansion<S>> *out, StateType pathStartState,
                                    int reverseBaseType) {
-  const auto &backTable = PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
+  const auto &backTable = BACKWARD_TRANSITIONS;
   for (; start != end; ++start) {
     StateType cur = start->first;
     int curTowers = start->second;
@@ -170,7 +170,7 @@ template <typename S>
 static void reverseExpandChunkProgressImpl(const QueueEntry *start, const QueueEntry *end,
                                            std::vector<ReverseExpansion<S>> *out, StateType pathStartState,
                                            int reverseBaseType, std::atomic<size_t> *expandedStates) {
-  const auto &backTable = PATH_FROM_EMPTY ? BACKWARD_TRANSITIONS_EMPTY : BACKWARD_TRANSITIONS;
+  const auto &backTable = BACKWARD_TRANSITIONS;
   size_t localExpanded = 0;
   for (; start != end; ++start) {
     StateType cur = start->first;
@@ -646,8 +646,8 @@ reverseDepthOfImpl(const ankerl::unordered_dense::segmented_set<S, StorageHash<S
 }
 
 template <typename S> static std::vector<std::pair<int, int>> buildPathFromReverseBfsImpl(StateType finalState) {
-  const StateType pathStartState = PATH_FROM_EMPTY ? StateType(0) : g_baseState;
-  const int reverseBaseType = PATH_FROM_EMPTY ? 0 : 1;
+  const StateType pathStartState = StateType(0);
+  const int reverseBaseType = 0;
 
 #ifdef _WIN32
   SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
