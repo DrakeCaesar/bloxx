@@ -17,7 +17,11 @@ from pathlib import Path
 # On Windows, force UTF-8 stdout so half-block chars (▐ ▌) and ANSI codes work
 if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
+        reconfigure = getattr(sys.stdout, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+        else:
+            raise AttributeError
     except AttributeError:
         import io
 
@@ -133,7 +137,9 @@ def state_line_to_grid(
     state_line: str, positions: list[tuple[int, int]], rows: int, cols: int
 ) -> list[list[int | None]]:
     """Build a rows x cols grid. None = hole, 0-5 = tower type. Position i in state_line maps to positions[i]."""
-    grid = [[None] * cols for _ in range(rows)]
+    grid: list[list[int | None]] = []
+    for _ in range(rows):
+        grid.append([None] * cols)
     for i, (r, c) in enumerate(positions):
         if i < len(state_line):
             grid[r][c] = int(state_line[i])
@@ -221,7 +227,7 @@ def print_path_horizontal(
 def main() -> None:
     path = sys.argv[1] if len(sys.argv) > 1 else None
     if not path or path in ("-h", "--help"):
-        print(__doc__.strip())
+        print((__doc__ or "").strip())
         print("\nUsage: python scripts/view_best_states.py <best_states_file>")
         sys.exit(0 if path in ("-h", "--help") else 1)
 

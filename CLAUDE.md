@@ -44,7 +44,6 @@ The project uses CMake with C++20 standard. Single dependency: [ankerl::unordere
 - Global lookup tables (`g_neighborShifts`, `g_symmPerm`) for zero-overhead access
 
 **search_bfs.cpp** - Reverse BFS for path reconstruction (mode 0 and after sliding window).
-**search_dfs.cpp** - Depth-limited DFS with min-depth visited set and in-memory path (mode 2).
 
 **Headers** (provide modularity and separation of concerns):
 - **config.h** - State type, constants, compile-time configuration (level/unlocked type ranges)
@@ -83,7 +82,7 @@ The project uses CMake with C++20 standard. Single dependency: [ankerl::unordere
 
 ### Search Algorithms
 
-Four search modes (configure in config.h via `SEARCH_MODE`):
+Three search modes (configure in config.h via `SEARCH_MODE`):
 
 1. **BFS (0)**: Breadth-first search using queue
  - Guaranteed optimal solutions
@@ -95,11 +94,7 @@ Four search modes (configure in config.h via `SEARCH_MODE`):
  - See detailed section below
  - Path reconstruction via reverse BFS in search_bfs.cpp
 
-3. **DFS (2)**: Depth-limited DFS with min-depth visited set and in-memory path
- - No reverse BFS; path derived from stored state sequence
- - Depth limit `DFS_MAX_DEPTH`
-
-4. **Sliding window only (3)**: Same sliding window as mode 1, but no path reconstruction
+3. **Sliding window only (2)**: Same sliding window as mode 1, but no path reconstruction
  - Runs sliding window to find optimal board state only; no reverse BFS to empty/start
 
 ### Sliding Window Optimization (SEARCH_MODE=1)
@@ -127,7 +122,7 @@ Four search modes (configure in config.h via `SEARCH_MODE`):
 
 ### Placement Rules & Game Logic
 
-Tower types are numbered 1-5 (0 = empty/unplaced). The board starts from all type 1 (Blue).
+Tower types are numbered 1-5 (0 = empty/unplaced). Path finding starts from empty (all 0).
 
 Tower placement follows dependency rules verified by `canPlace()`:
 - **Type 1 (Blue)**: Can be placed anywhere (no requirements)
@@ -145,8 +140,7 @@ Score = sum of position types for all positions (type 0 = 0, type 1 = 1, …, ty
 **In config.h** - Key compile-time constants:
 
 **Grid & Search**:
-- `SEARCH_MODE`: Algorithm selector (0=BFS, 1=Sliding Window, 2=DFS, 3=Sliding window only)
-- `DFS_MAX_DEPTH`: Max depth for DFS mode (2) only
+- `SEARCH_MODE`: Algorithm selector (0=BFS, 1=Sliding Window, 2=Sliding window only)
 - `KERNEL_INDEX`: Selects window kernel pattern (0-5, see patterns below)
 
 **Sliding Window**:
@@ -195,7 +189,6 @@ Score = sum of position types for all positions (type 0 = 0, type 1 = 1, …, ty
 **Memory Usage**:
 - Large visited/parent containers use `ankerl::unordered_dense::segmented_set` / `segmented_map` for lower peak memory and smoother growth.
 - BFS: Grows with visited states (GBs for large grids)
-- DFS: Min-depth map + path stack (MBs to low GBs)
 - Sliding window: Window-sized frontier (MBs to low GBs)
 
 **CPU**:
